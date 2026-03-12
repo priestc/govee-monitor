@@ -77,22 +77,30 @@ def index():
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #111; color: #eee; padding: 1.5rem; }
-    h1 { font-size: 1.4rem; margin-bottom: 1.5rem; color: #fff; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem; color: #1a2535; letter-spacing: -.02em; }
     .cards { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
-    .card { background: #1e1e1e; border-radius: 8px; padding: 1rem 1.5rem; min-width: 180px; }
-    .card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: .05em; }
-    .card .temp  { font-size: 2.2rem; font-weight: 600; color: #f0a040; margin: .25rem 0; }
-    .card .hum   { font-size: 1rem; color: #60b0f0; }
-    .card .ts    { font-size: 0.75rem; color: #555; margin-top: .4rem; }
-    .chart-wrap  { background: #1e1e1e; border-radius: 8px; padding: 1.2rem; margin-bottom: 1.5rem; }
-    .chart-wrap h2 { font-size: 1rem; color: #aaa; margin-bottom: 1rem; }
-    .range-btns  { margin-bottom: 1.5rem; display: flex; gap: .5rem; flex-wrap: wrap; }
-    .range-btns button {
-      background: #2a2a2a; color: #ccc; border: 1px solid #333;
-      border-radius: 5px; padding: .35rem .9rem; cursor: pointer; font-size: .85rem;
+    .card {
+      background: #fff; border-radius: 12px; padding: 1.1rem 1.5rem; min-width: 190px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
     }
-    .range-btns button.active { background: #f0a040; color: #111; border-color: #f0a040; }
+    .card .label { font-size: 0.75rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+    .card .temp  { font-size: 2.4rem; font-weight: 700; color: #e07820; margin: .2rem 0 .1rem; line-height: 1; }
+    .card .hum   { font-size: 1rem; color: #2e7dd4; font-weight: 500; }
+    .card .ts    { font-size: 0.72rem; color: #aabbc8; margin-top: .5rem; }
+    .chart-wrap  {
+      background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem;
+      margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
+    }
+    .chart-wrap h2 { font-size: 0.85rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 1rem; }
+    .range-btns  { margin-bottom: 1.5rem; display: flex; gap: .4rem; flex-wrap: wrap; }
+    .range-btns button {
+      background: #fff; color: #4a6080; border: 1px solid #d0dce8;
+      border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem;
+      font-weight: 500; transition: all .15s;
+    }
+    .range-btns button:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .range-btns button.active { background: #e07820; color: #fff; border-color: #e07820; }
   </style>
 </head>
 <body>
@@ -118,7 +126,7 @@ def index():
   </div>
 
 <script>
-const COLORS = ["#f0a040","#60b0f0","#80e080","#e060e0","#e08060"];
+const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b"];
 let tempChart, humChart, rangeDays = 1;
 
 const tempCtx = document.getElementById("tempChart").getContext("2d");
@@ -131,17 +139,17 @@ function makeChart(ctx, label, yLabel) {
     options: {
       animation: false,
       parsing: false,
-      plugins: { legend: { labels: { color: "#ccc" } } },
+      plugins: { legend: { labels: { color: "#4a6080" } } },
       scales: {
         x: {
           type: "time",
           time: { tooltipFormat: "MMM d, h:mm a" },
-          ticks: { color: "#777", maxTicksLimit: 8 },
-          grid:  { color: "#2a2a2a" }
+          ticks: { color: "#7a90a8", maxTicksLimit: 8 },
+          grid:  { color: "#e8eef4" }
         },
         y: {
-          ticks: { color: "#777" },
-          grid:  { color: "#2a2a2a" },
+          ticks: { color: "#7a90a8" },
+          grid:  { color: "#e8eef4" },
           title: { display: false }
         }
       }
