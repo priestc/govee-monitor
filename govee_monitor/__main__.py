@@ -105,7 +105,9 @@ def monitor(duration, verbose, db, no_db):
     """Continuously print readings from nearby H5074 sensors."""
     label_map = _labels.load()
     seen: set[str] = set()
-    last_temp: dict[str, float] = {}  # address -> last recorded temp_f
+    last_temp: dict[str, float] = {}      # address -> last recorded temp_f
+    last_write: dict[str, datetime.datetime] = {}  # address -> last write time
+    HEARTBEAT = datetime.timedelta(minutes=30)
     conn = None if no_db else open_db(db)
     if conn:
         click.echo(f"Logging to {db}")
@@ -115,9 +117,14 @@ def monitor(duration, verbose, db, no_db):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         click.echo(f"[{ts}] {reading}")
         seen.add(reading.address)
-        if conn and reading.temp_f != last_temp.get(reading.address):
-            insert_reading(conn, reading)
-            last_temp[reading.address] = reading.temp_f
+        if conn:
+            now = datetime.datetime.now()
+            temp_changed = reading.temp_f != last_temp.get(reading.address)
+            overdue = (now - last_write.get(reading.address, datetime.datetime.min)) >= HEARTBEAT
+            if temp_changed or overdue:
+                insert_reading(conn, reading)
+                last_temp[reading.address] = reading.temp_f
+                last_write[reading.address] = now
 
     click.echo("Scanning for Govee H5074 sensors... (Ctrl+C to stop)")
     try:
