@@ -55,5 +55,50 @@ def scan_once(timeout, verbose):
             click.echo(f"  {r}")
 
 
+@main.command("scan-all")
+@click.option("--timeout", "-t", type=float, default=15.0,
+              help="Seconds to scan (default: 15).")
+def scan_all(timeout):
+    """Scan for ALL nearby BLE devices and dump their raw advertisement data.
+
+    Use this to diagnose what your sensors are actually advertising.
+    """
+    import asyncio
+    from bleak import BleakScanner
+
+    seen = {}
+
+    def callback(device, adv):
+        seen[device.address] = (device, adv)
+
+    async def _run():
+        async with BleakScanner(detection_callback=callback):
+            await asyncio.sleep(timeout)
+
+    click.echo(f"Scanning all BLE devices for {timeout}s...")
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        pass
+
+    if not seen:
+        click.echo("No BLE devices found. Check that bluetoothd is running and you have permission.")
+        click.echo("Try: sudo govee-monitor scan-all")
+        return
+
+    click.echo(f"\nFound {len(seen)} device(s):\n")
+    for addr, (device, adv) in sorted(seen.items()):
+        name = device.name or adv.local_name or "(no name)"
+        click.echo(f"  {addr}  name={name!r}  rssi={adv.rssi}")
+        if adv.manufacturer_data:
+            for cid, data in adv.manufacturer_data.items():
+                click.echo(f"    manufacturer[0x{cid:04X}] = {data.hex()}")
+        if adv.service_data:
+            for uuid, data in adv.service_data.items():
+                click.echo(f"    service_data[{uuid}] = {data.hex()}")
+        if adv.service_uuids:
+            click.echo(f"    service_uuids = {adv.service_uuids}")
+
+
 if __name__ == "__main__":
     main()
