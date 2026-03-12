@@ -9,8 +9,11 @@ _LABELS_FILE = _CONFIG_DIR / "labels.json"
 def load() -> dict[str, str]:
     """Return {address: label} mapping from disk."""
     if _LABELS_FILE.exists():
-        with open(_LABELS_FILE) as f:
-            return json.load(f)
+        try:
+            with open(_LABELS_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            pass
     return {}
 
 
