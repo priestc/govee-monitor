@@ -174,7 +174,7 @@ async function loadCurrent() {
       <div class="label">${s.label || s.address}</div>
       <div class="temp">${s.temp_f.toFixed(1)}°F</div>
       <div class="hum">${s.humidity.toFixed(1)}% RH</div>
-      <div class="ts">${s.ts}</div>
+      <div class="ts">${new Date((s.ts.endsWith('Z') ? s.ts : s.ts + 'Z')).toLocaleString()}</div>
     </div>`).join("");
 }
 
@@ -186,7 +186,8 @@ async function loadCharts() {
   // group by label, sort ascending
   const byLabel = {};
   for (const row of data) {
-    (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.temp_f, h: row.humidity });
+    const ts = row.ts.endsWith('Z') ? row.ts : row.ts + 'Z';
+    (byLabel[row.label] ??= []).push({ x: new Date(ts), y: row.temp_f, h: row.humidity });
   }
   for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
 
