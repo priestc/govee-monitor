@@ -18,12 +18,13 @@ class Reading:
 
     def __str__(self) -> str:
         display = self.label if self.label else self.name
+        batt = f"  battery={self.battery}%" if self.battery is not None else ""
         rssi = f"  rssi={self.rssi}" if self.rssi is not None else ""
         return (
             f"{display}"
             f"  temp={self.temp_f:.1f}°F"
             f"  humidity={self.humidity:.1f}%"
-            f"{rssi}"
+            f"{batt}{rssi}"
         )
 
 
