@@ -203,6 +203,13 @@ async function loadCharts() {
     tension: 0.3,
   }));
 
+  const now = new Date();
+  const startDate = new Date(Date.now() - rangeDays * 86400000);
+  [tempChart, humChart].forEach(c => {
+    c.options.scales.x.min = startDate;
+    c.options.scales.x.max = now;
+  });
+
   tempChart.update();
   humChart.update();
 }
