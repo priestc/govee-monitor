@@ -27,6 +27,10 @@ def open_db(path: str) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply any schema migrations needed on existing databases."""
+    # Normalize space-separated timestamps to T-separated ISO format
+    conn.execute("UPDATE readings SET ts = REPLACE(ts, ' ', 'T') WHERE ts LIKE '% %'")
+    conn.commit()
+
     # Check if address column is NOT NULL (old schema) and migrate if so
     cols = {row[1]: row[3] for row in conn.execute("PRAGMA table_info(readings)")}
     if cols.get("address") == 1:  # 1 = NOT NULL
@@ -64,10 +68,13 @@ def insert_reading(conn: sqlite3.Connection, reading) -> None:
 
 def bulk_insert(conn: sqlite3.Connection, rows: list[tuple]) -> int:
     """Insert (ts, label, temp_f, humidity) tuples. Returns number of rows inserted."""
+    # Normalize timestamps to ISO format with T separator
+    normalized = [(ts.replace(" ", "T"), label, temp_f, humidity)
+                  for ts, label, temp_f, humidity in rows]
     before = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
     conn.executemany(
         "INSERT OR IGNORE INTO readings (ts, label, temp_f, humidity) VALUES (?,?,?,?)",
-        rows,
+        normalized,
     )
     conn.commit()
     after = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
