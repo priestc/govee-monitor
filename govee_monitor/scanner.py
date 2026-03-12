@@ -8,7 +8,7 @@ from govee_monitor.decoder import decode_advertisement, Reading
 
 def is_govee_h5074(device: BLEDevice, adv: AdvertisementData) -> bool:
     name = device.name or adv.local_name or ""
-    return name.startswith("GVH5074")
+    return name.startswith("GVH5074") or name.startswith("Govee_H5074")
 
 
 async def scan(

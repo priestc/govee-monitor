@@ -36,17 +36,25 @@ def decode_advertisement(address: str, name: str, manufacturer_data: dict, rssi:
     data = manufacturer_data.get(GOVEE_COMPANY_ID)
     if data is None:
         return None
-    if len(data) < 4:
+    # Payload is either 4 bytes (original H5075-style) or 7 bytes (H5074 with leading 0x00).
+    # 7-byte format: byte 0 = 0x00 prefix, bytes 1-3 = packed temp+humidity, byte 4 = battery.
+    # 4-byte format: bytes 0-2 = packed temp+humidity, byte 3 = battery.
+    if len(data) >= 7 and data[0] == 0x00:
+        raw_bytes = data[1:4]
+        battery = data[4]
+    elif len(data) >= 4:
+        raw_bytes = data[0:3]
+        battery = data[3]
+    else:
         return None
 
-    raw = int.from_bytes(data[0:3], "big")
+    raw = int.from_bytes(raw_bytes, "big")
     if raw & 0x800000:
         raw = 0x1000000 - raw
         temp_c = -(raw // 1000) / 10
     else:
         temp_c = (raw // 1000) / 10
     humidity = (raw % 1000) / 10
-    battery = data[3] if len(data) > 3 else None
 
     return Reading(
         address=address,
