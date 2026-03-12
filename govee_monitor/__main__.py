@@ -11,6 +11,41 @@ def main():
     """Monitor Govee H5074 temperature/humidity sensors via BLE."""
 
 
+@main.command("label")
+@click.option("--timeout", "-t", type=float, default=30.0,
+              help="Seconds to scan for sensors (default: 30).")
+def label_sensors(timeout):
+    """Scan for sensors, then prompt for a label for each unlabeled one."""
+    label_map = _labels.load()
+    found: dict[str, str] = {}  # address -> govee name
+
+    def on_reading(reading):
+        if reading.address not in label_map and reading.address not in found:
+            found[reading.address] = reading.name
+
+    click.echo(f"Scanning for sensors ({int(timeout)}s)...")
+    try:
+        asyncio.run(scan(on_reading, duration=timeout))
+    except KeyboardInterrupt:
+        pass
+
+    if not found:
+        click.echo("No new (unlabeled) sensors found.")
+        return
+
+    click.echo(f"\nFound {len(found)} new sensor(s). Enter a label for each:\n")
+    changed = False
+    for addr, name in found.items():
+        label = click.prompt(f"  {name} ({addr})").strip()
+        if label:
+            label_map[addr] = label
+            changed = True
+
+    if changed:
+        _labels.save(label_map)
+        click.echo("\nLabels saved.")
+
+
 @main.command()
 @click.option("--duration", "-d", type=float, default=None,
               help="How many seconds to scan (default: indefinitely).")
@@ -18,36 +53,17 @@ def main():
 def monitor(duration, verbose):
     """Continuously print readings from nearby H5074 sensors."""
     label_map = _labels.load()
-    pending: set[str] = set()
     seen: set[str] = set()
 
-    async def _run():
-        loop = asyncio.get_event_loop()
-
-        async def prompt_label(address: str, name: str) -> None:
-            click.echo(f"\nNew sensor found: {name} ({address})")
-            label = await loop.run_in_executor(
-                None, lambda: click.prompt("  Enter a label").strip()
-            )
-            label_map[address] = label
-            _labels.save(label_map)
-
-        def on_reading(reading):
-            if reading.address not in label_map:
-                if reading.address not in pending:
-                    pending.add(reading.address)
-                    asyncio.ensure_future(prompt_label(reading.address, reading.name))
-                return  # skip printing until label is assigned
-            reading.label = label_map[reading.address]
-            ts = datetime.datetime.now().strftime("%H:%M:%S")
-            click.echo(f"[{ts}] {reading}")
-            seen.add(reading.address)
-
-        await scan(on_reading, duration=duration, verbose=verbose)
+    def on_reading(reading):
+        reading.label = label_map.get(reading.address)
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        click.echo(f"[{ts}] {reading}")
+        seen.add(reading.address)
 
     click.echo("Scanning for Govee H5074 sensors... (Ctrl+C to stop)")
     try:
-        asyncio.run(_run())
+        asyncio.run(scan(on_reading, duration=duration, verbose=verbose))
     except KeyboardInterrupt:
         click.echo(f"\nDone. Saw {len(seen)} device(s).")
 
@@ -59,34 +75,15 @@ def monitor(duration, verbose):
 def scan_once(timeout, verbose):
     """Scan for a fixed duration and print all devices found."""
     label_map = _labels.load()
-    pending: set[str] = set()
     readings: dict[str, object] = {}
 
-    async def _run():
-        loop = asyncio.get_event_loop()
-
-        async def prompt_label(address: str, name: str) -> None:
-            click.echo(f"\nNew sensor found: {name} ({address})")
-            label = await loop.run_in_executor(
-                None, lambda: click.prompt("  Enter a label").strip()
-            )
-            label_map[address] = label
-            _labels.save(label_map)
-
-        def on_reading(reading):
-            if reading.address not in label_map:
-                if reading.address not in pending:
-                    pending.add(reading.address)
-                    asyncio.ensure_future(prompt_label(reading.address, reading.name))
-                return
-            reading.label = label_map[reading.address]
-            readings[reading.address] = reading
-
-        await scan(on_reading, duration=timeout, verbose=verbose)
+    def on_reading(reading):
+        reading.label = label_map.get(reading.address)
+        readings[reading.address] = reading
 
     click.echo(f"Scanning for {timeout}s...")
     try:
-        asyncio.run(_run())
+        asyncio.run(scan(on_reading, duration=timeout, verbose=verbose))
     except KeyboardInterrupt:
         pass
 
