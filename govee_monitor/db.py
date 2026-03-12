@@ -21,7 +21,36 @@ def open_db(path: str) -> sqlite3.Connection:
         )
     """)
     conn.commit()
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply any schema migrations needed on existing databases."""
+    # Check if address column is NOT NULL (old schema) and migrate if so
+    cols = {row[1]: row[3] for row in conn.execute("PRAGMA table_info(readings)")}
+    if cols.get("address") == 1:  # 1 = NOT NULL
+        conn.executescript("""
+            PRAGMA foreign_keys=off;
+            BEGIN;
+            ALTER TABLE readings RENAME TO _readings_old;
+            CREATE TABLE readings (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts        TEXT    NOT NULL,
+                address   TEXT,
+                label     TEXT,
+                temp_f    REAL    NOT NULL,
+                humidity  REAL    NOT NULL,
+                rssi      INTEGER,
+                UNIQUE(ts, label)
+            );
+            INSERT INTO readings SELECT id, ts, address, label, temp_f, humidity, rssi
+              FROM _readings_old;
+            DROP TABLE _readings_old;
+            COMMIT;
+            PRAGMA foreign_keys=on;
+        """)
+        conn.commit()
 
 
 def insert_reading(conn: sqlite3.Connection, reading) -> None:
