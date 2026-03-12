@@ -5,17 +5,42 @@ from bleak import BleakClient, BleakError
 BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
 
 
-async def read_battery(address: str, timeout: float = 10.0) -> int | None:
-    """Connect to a device and read its battery level (0-100). Returns None on failure."""
+async def read_battery(address: str, timeout: float = 10.0) -> tuple[int | None, str | None]:
+    """Connect to a device and read its battery level.
+    Returns (level, error_message). level is None on failure."""
     try:
         async with BleakClient(address, timeout=timeout) as client:
             data = await client.read_gatt_char(BATTERY_CHAR_UUID)
-            return data[0]
-    except (BleakError, asyncio.TimeoutError, Exception):
-        return None
+            return data[0], None
+    except (BleakError, asyncio.TimeoutError, Exception) as e:
+        return None, str(e)
 
 
 async def read_batteries(addresses: list[str]) -> dict[str, int | None]:
-    """Read battery for multiple devices concurrently."""
+    """Read battery for multiple devices concurrently. Prints errors if reads fail."""
     results = await asyncio.gather(*[read_battery(a) for a in addresses])
-    return dict(zip(addresses, results))
+    out = {}
+    for addr, (level, err) in zip(addresses, results):
+        if err:
+            print(f"  battery read failed for {addr}: {err}")
+        out[addr] = level
+    return out
+
+
+async def dump_gatt(address: str, timeout: float = 10.0) -> None:
+    """Connect and print all GATT services and characteristics."""
+    try:
+        async with BleakClient(address, timeout=timeout) as client:
+            for service in client.services:
+                print(f"  Service: {service.uuid}  ({service.description})")
+                for char in service.characteristics:
+                    props = ",".join(char.properties)
+                    print(f"    Char: {char.uuid}  [{props}]  ({char.description})")
+                    if "read" in char.properties:
+                        try:
+                            val = await client.read_gatt_char(char.uuid)
+                            print(f"      value: {val.hex()}  {list(val)}")
+                        except Exception as e:
+                            print(f"      read error: {e}")
+    except Exception as e:
+        print(f"  Connection failed: {e}")

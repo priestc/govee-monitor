@@ -4,7 +4,7 @@ import datetime
 import click
 from govee_monitor.scanner import scan
 from govee_monitor import labels as _labels
-from govee_monitor.battery import read_batteries
+from govee_monitor.battery import read_batteries, dump_gatt
 
 
 @click.group()
@@ -121,6 +121,18 @@ def scan_once(timeout, verbose):
         click.echo(f"\nFound {len(readings)} device(s):")
         for r in readings.values():
             click.echo(f"  {r}")
+
+
+@main.command("gatt-dump")
+@click.argument("address")
+def gatt_dump(address):
+    """Connect to ADDRESS and dump all GATT services and readable characteristic values.
+
+    Use this to find where battery info is stored. Example:\n
+      govee-monitor gatt-dump A4:C1:38:C7:6E:35
+    """
+    click.echo(f"Connecting to {address}...")
+    asyncio.run(dump_gatt(address))
 
 
 @main.command("scan-all")
