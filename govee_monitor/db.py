@@ -6,7 +6,8 @@ from pathlib import Path
 
 def open_db(path: str) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS readings (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,10 +35,11 @@ def insert_reading(conn: sqlite3.Connection, reading) -> None:
 
 def bulk_insert(conn: sqlite3.Connection, rows: list[tuple]) -> int:
     """Insert (ts, label, temp_f, humidity) tuples. Returns number of rows inserted."""
-    before = conn.execute("SELECT changes()").fetchone()[0]
+    before = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
     conn.executemany(
         "INSERT OR IGNORE INTO readings (ts, label, temp_f, humidity) VALUES (?,?,?,?)",
         rows,
     )
     conn.commit()
-    return conn.execute("SELECT changes()").fetchone()[0]
+    after = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
+    return after - before
