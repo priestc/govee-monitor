@@ -4,7 +4,7 @@ import datetime
 import click
 from govee_monitor.scanner import scan
 from govee_monitor import labels as _labels
-from govee_monitor.battery import read_batteries, dump_gatt
+from govee_monitor.battery import dump_gatt
 
 
 @click.group()
@@ -47,15 +47,6 @@ def label_sensors(timeout):
         click.echo("\nLabels saved.")
 
 
-def _fetch_batteries(addresses: list[str]) -> dict[str, int | None]:
-    """Synchronously read battery level from each address via GATT."""
-    if not addresses:
-        return {}
-    click.echo(f"Reading battery levels...")
-    result = asyncio.run(read_batteries(addresses))
-    return result
-
-
 @main.command()
 @click.option("--duration", "-d", type=float, default=None,
               help="How many seconds to scan (default: indefinitely).")
@@ -63,33 +54,15 @@ def _fetch_batteries(addresses: list[str]) -> dict[str, int | None]:
 def monitor(duration, verbose):
     """Continuously print readings from nearby H5074 sensors."""
     label_map = _labels.load()
-    battery_cache: dict[str, int | None] = {}
     seen: set[str] = set()
-
-    # Do a brief passive scan to discover devices, then read their batteries
-    discovered: dict[str, str] = {}
-
-    def _discover(reading):
-        if reading.address not in discovered:
-            discovered[reading.address] = reading.name
-
-    click.echo("Discovering sensors (10s)...")
-    try:
-        asyncio.run(scan(_discover, duration=10.0))
-    except KeyboardInterrupt:
-        pass
-
-    if discovered:
-        battery_cache = _fetch_batteries(list(discovered.keys()))
 
     def on_reading(reading):
         reading.label = label_map.get(reading.address)
-        reading.battery = battery_cache.get(reading.address)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         click.echo(f"[{ts}] {reading}")
         seen.add(reading.address)
 
-    click.echo("Monitoring... (Ctrl+C to stop)")
+    click.echo("Scanning for Govee H5074 sensors... (Ctrl+C to stop)")
     try:
         asyncio.run(scan(on_reading, duration=duration, verbose=verbose))
     except KeyboardInterrupt:
