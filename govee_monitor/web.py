@@ -39,7 +39,7 @@ def history():
     start = request.args.get("start")
     end   = request.args.get("end")
     try:
-        limit = min(int(request.args.get("limit", 1000)), 10000)
+        limit = min(int(request.args.get("limit", 1000)), 200000)
     except ValueError:
         return jsonify({"error": "limit must be an integer"}), 400
 
@@ -171,7 +171,8 @@ async function loadCurrent() {
 
 async function loadCharts() {
   const start = new Date(Date.now() - rangeDays * 86400000).toISOString().slice(0,19);
-  const data  = await fetch(`/api/history?start=${start}&limit=10000`).then(r => r.json());
+  const limit = rangeDays * 24 * 60 * 10; // 10 readings/min headroom per sensor
+  const data  = await fetch(`/api/history?start=${start}&limit=${limit}`).then(r => r.json());
 
   // group by label, sort ascending
   const byLabel = {};
