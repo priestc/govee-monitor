@@ -109,6 +109,7 @@ def index():
   <div class="cards" id="cards"></div>
 
   <div class="range-btns">
+    <button onclick="setRange(0.125)" >3h</button>
     <button onclick="setRange(1)"  class="active">24h</button>
     <button onclick="setRange(3)"  >3d</button>
     <button onclick="setRange(7)"  >7d</button>
@@ -160,7 +161,7 @@ function makeChart(ctx, label, yLabel) {
 function setRange(days) {
   rangeDays = days;
   document.querySelectorAll(".range-btns button").forEach((b,i) => {
-    b.classList.toggle("active", [1,3,7,30][i] === days);
+    b.classList.toggle("active", [0.125,1,3,7,30][i] === days);
   });
   loadCharts();
 }
