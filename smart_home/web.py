@@ -175,20 +175,24 @@ async function loadCurrent() {
       <div class="label">${s.label || s.address}</div>
       <div class="temp">${s.temp_f.toFixed(1)}°F</div>
       <div class="hum">${s.humidity.toFixed(1)}% RH</div>
-      <div class="ts">${new Date((s.ts.endsWith('Z') ? s.ts : s.ts + 'Z')).toLocaleString()}</div>
+      <div class="ts">${new Date(s.ts).toLocaleString()}</div>
     </div>`).join("");
 }
 
+function localISO(date) {
+  const p = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${p(date.getMonth()+1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
+}
+
 async function loadCharts() {
-  const start = new Date(Date.now() - rangeDays * 86400000).toISOString().slice(0,19);
+  const start = localISO(new Date(Date.now() - rangeDays * 86400000));
   const limit = Math.max(2000, rangeDays * 24 * 60 * 10);
   const data  = await fetch(`/api/history?start=${start}&limit=${limit}`).then(r => r.json());
 
   // group by label, sort ascending
   const byLabel = {};
   for (const row of data) {
-    const ts = row.ts.endsWith('Z') ? row.ts : row.ts + 'Z';
-    (byLabel[row.label] ??= []).push({ x: new Date(ts), y: row.temp_f, h: row.humidity });
+    (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.temp_f, h: row.humidity });
   }
   for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
 
