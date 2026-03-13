@@ -5,6 +5,7 @@ import datetime
 import io
 import zipfile
 import click
+from bleak import BleakScanner
 from smart_home.scanner import scan
 from smart_home import labels as _labels
 from smart_home.battery import dump_gatt
@@ -38,6 +39,63 @@ def label_sensors(timeout):
 
     if not found:
         click.echo("No new (unlabeled) sensors found.")
+        return
+
+    click.echo(f"\nFound {len(found)} new sensor(s). Enter a label for each:\n")
+    changed = False
+    for addr, name in found.items():
+        label = click.prompt(f"  {name} ({addr})").strip()
+        if label:
+            label_map[addr] = label
+            changed = True
+
+    if changed:
+        _labels.save(label_map)
+        click.echo("\nLabels saved.")
+
+
+DEVICE_TYPES = {
+    "1": ("Govee H5074",         ("Govee_H5074", "GVH5074")),
+    "2": ("Xiaomi LYWSD03MMC",   ("LYWSD03MMC", "ATC_")),
+}
+
+
+@main.command("add-device")
+@click.option("--timeout", "-t", type=float, default=15.0,
+              help="Seconds to scan (default: 15).")
+def add_device(timeout):
+    """Scan for sensors and register them with a label.
+
+    Prompts for device type, scans for matching BLE devices, then asks
+    for a label for each new device found.
+    """
+    click.echo("What type of sensor do you want to add?\n")
+    for key, (name, _) in DEVICE_TYPES.items():
+        click.echo(f"  {key}. {name}")
+    choice = click.prompt("\nEnter choice", type=click.Choice(list(DEVICE_TYPES)))
+    type_label, name_prefixes = DEVICE_TYPES[choice]
+
+    label_map = _labels.load()
+    found: dict[str, str] = {}  # address -> device name
+
+    def callback(device, adv):
+        name = device.name or adv.local_name or ""
+        if any(name.startswith(p) for p in name_prefixes):
+            if device.address not in label_map and device.address not in found:
+                found[device.address] = name
+
+    async def _run():
+        async with BleakScanner(detection_callback=callback):
+            await asyncio.sleep(timeout)
+
+    click.echo(f"\nScanning for {type_label} sensors ({int(timeout)}s)...")
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        pass
+
+    if not found:
+        click.echo(f"No new {type_label} devices found.")
         return
 
     click.echo(f"\nFound {len(found)} new sensor(s). Enter a label for each:\n")
