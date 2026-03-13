@@ -71,6 +71,31 @@ def list_devices():
         click.echo(f"  {label:<20} {addr}")
 
 
+@main.command("sensor-history")
+@click.option("--label", "-l", default=None, help="Filter by sensor label.")
+@click.option("--limit", "-n", default=20, show_default=True, help="Number of rows to show.")
+@click.option("--db", default=DEFAULT_DB, show_default=True, help="SQLite database path.")
+def sensor_history(label, limit, db):
+    """Show recent sensor readings from the database."""
+    conn = open_db(db)
+    params = [limit]
+    where = ""
+    if label:
+        where = "WHERE label = ? "
+        params.insert(0, label)
+    rows = conn.execute(
+        f"SELECT ts, label, temp_f, humidity FROM readings {where}ORDER BY ts DESC LIMIT ?",
+        params,
+    ).fetchall()
+    if not rows:
+        click.echo("No readings found.")
+        return
+    click.echo(f"  {'timestamp':<22} {'label':<20} {'temp (°F)':<12} {'humidity'}")
+    click.echo("  " + "-" * 62)
+    for ts, lbl, temp_f, humidity in rows:
+        click.echo(f"  {ts:<22} {(lbl or ''):<20} {temp_f:<12.1f} {humidity:.1f}%")
+
+
 @main.command("add-device")
 @click.option("--timeout", "-t", type=float, default=15.0,
               help="Seconds to scan (default: 15).")
