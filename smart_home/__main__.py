@@ -77,7 +77,7 @@ def import_zip(zipfile_path, label, db):
             for line in reader:
                 if len(line) < 3:
                     continue
-                ts = line[0].strip()
+                ts = line[0].strip().replace(" ", "T")
                 try:
                     temp_f = float(line[1].strip())
                     humidity = float(line[2].strip())
