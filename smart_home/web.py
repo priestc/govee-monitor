@@ -220,10 +220,12 @@ async function loadCharts() {
 
   const xMin = new Date(Date.now() - rangeDays * 86400000);
   const xMax = new Date();
-  tempChart.options.scales.x.min = xMin;
-  tempChart.options.scales.x.max = xMax;
-  humChart.options.scales.x.min  = xMin;
-  humChart.options.scales.x.max  = xMax;
+  const timeUnit = rangeDays >= 3 ? "day" : "hour";
+  for (const chart of [tempChart, humChart]) {
+    chart.options.scales.x.min = xMin;
+    chart.options.scales.x.max = xMax;
+    chart.options.scales.x.time.unit = timeUnit;
+  }
 
   tempChart.update();
   humChart.update();
