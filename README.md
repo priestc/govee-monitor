@@ -160,6 +160,25 @@ smart-home import ~/outside.zip --label=outside
 
 ---
 
+## iPhone Home Screen Widget
+
+The `scriptable/SmartHomeWidget.js` file provides a home screen widget using the free [Scriptable](https://apps.apple.com/us/app/scriptable/id1405459188) app.
+
+### Setup
+
+1. Install **Scriptable** from the App Store
+2. Open the script file on your phone (AirDrop, iCloud, or copy/paste) and add it to Scriptable
+3. Edit the top of the script and set `SERVER_URL` to your server's IP address:
+   ```js
+   const SERVER_URL = "http://192.168.1.100:5000"
+   ```
+4. Long-press your home screen → tap **+** → search for **Scriptable**
+5. Choose the **Medium** widget size and select **SmartHomeWidget**
+
+> **Note:** Your iPhone must be on the same WiFi network as the server for the widget to reach it.
+
+---
+
 ## Diagnostics
 
 Scan all nearby BLE devices (useful for troubleshooting):
