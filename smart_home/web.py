@@ -135,6 +135,8 @@ const COLORS = {
   ma:  "#9b4dca",
 };
 
+const toDate = s => new Date(s + "T12:00:00");
+
 let showMA = false;
 const charts = [];  // {chart, rows} for each sensor
 
@@ -214,9 +216,6 @@ async function load() {
     container.innerHTML = '<p class="empty">No trend data yet. Data will appear after at least one full day of readings.</p>';
     return;
   }
-
-  // parse dates as local noon to avoid UTC-midnight timezone shifts
-  const toDate = s => new Date(s + "T12:00:00");
 
   // find overall date range across all labels for consistent x-axis
   const allDates = data.map(r => toDate(r.date));
