@@ -165,6 +165,14 @@ async function load() {
     return;
   }
 
+  // parse dates as local noon to avoid UTC-midnight timezone shifts
+  const toDate = s => new Date(s + "T12:00:00");
+
+  // find overall date range across all labels for consistent x-axis
+  const allDates = data.map(r => toDate(r.date));
+  const xMin = new Date(Math.min(...allDates));
+  const xMax = new Date(Math.max(...allDates));
+
   for (const label of Object.keys(byLabel).sort()) {
     const rows = byLabel[label];
 
@@ -174,11 +182,13 @@ async function load() {
     container.appendChild(wrap);
 
     const chart = makeChart(wrap.querySelector("canvas").getContext("2d"), label);
+    chart.options.scales.x.min = xMin;
+    chart.options.scales.x.max = xMax;
 
     chart.data.datasets = [
       {
         label: "Max",
-        data: rows.map(r => ({ x: new Date(r.date), y: r.max_f })),
+        data: rows.map(r => ({ x: toDate(r.date), y: r.max_f })),
         borderColor: COLORS.max,
         backgroundColor: "transparent",
         borderWidth: 1.5,
@@ -187,7 +197,7 @@ async function load() {
       },
       {
         label: "Avg",
-        data: rows.map(r => ({ x: new Date(r.date), y: r.avg_f })),
+        data: rows.map(r => ({ x: toDate(r.date), y: r.avg_f })),
         borderColor: COLORS.avg,
         backgroundColor: "transparent",
         borderWidth: 1.5,
@@ -196,7 +206,7 @@ async function load() {
       },
       {
         label: "Min",
-        data: rows.map(r => ({ x: new Date(r.date), y: r.min_f })),
+        data: rows.map(r => ({ x: toDate(r.date), y: r.min_f })),
         borderColor: COLORS.min,
         backgroundColor: "transparent",
         borderWidth: 1.5,
