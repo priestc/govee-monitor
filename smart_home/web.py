@@ -66,6 +66,155 @@ def history():
     return jsonify([dict(r) for r in rows])
 
 
+@app.get("/api/trends")
+def trends():
+    """Daily min/max/avg temperature per label for the past year."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                DATE(ts) AS date,
+                label,
+                ROUND(MIN(temp_f), 1) AS min_f,
+                ROUND(MAX(temp_f), 1) AS max_f,
+                ROUND(AVG(temp_f), 1) AS avg_f
+            FROM readings
+            WHERE ts >= DATE('now', '-1 year')
+              AND label IS NOT NULL
+            GROUP BY DATE(ts), label
+            ORDER BY date ASC
+        """).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.get("/trends")
+def trends_page():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trends — Smart Home</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
+    .nav { margin-bottom: 1.5rem; }
+    .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .chart-wrap {
+      background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem;
+      margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
+    }
+    .chart-wrap h2 { font-size: 1rem; font-weight: 700; color: #1a2535; margin-bottom: 1rem; }
+    .empty { color: #7a90a8; font-size: .9rem; padding: .5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Temperature Trends</h1>
+  <div class="nav"><a href="/">&larr; Back to dashboard</a></div>
+  <div id="charts"></div>
+
+<script>
+const COLORS = {
+  max: "#e07820",
+  avg: "#2e7dd4",
+  min: "#2a9d6e",
+};
+
+function makeChart(ctx, label) {
+  return new Chart(ctx, {
+    type: "line",
+    data: { datasets: [] },
+    options: {
+      animation: false,
+      parsing: false,
+      plugins: {
+        legend: { labels: { color: "#4a6080" } },
+        title: { display: false }
+      },
+      scales: {
+        x: {
+          type: "time",
+          time: { unit: "month", tooltipFormat: "MMM d, yyyy" },
+          ticks: { color: "#7a90a8", maxTicksLimit: 12 },
+          grid:  { color: "#e8eef4" }
+        },
+        y: {
+          ticks: { color: "#7a90a8", callback: v => v + "°F" },
+          grid:  { color: "#e8eef4" }
+        }
+      }
+    }
+  });
+}
+
+async function load() {
+  const data = await fetch("/api/trends").then(r => r.json());
+  const container = document.getElementById("charts");
+
+  // group by label
+  const byLabel = {};
+  for (const row of data) {
+    (byLabel[row.label] ??= []).push(row);
+  }
+
+  if (Object.keys(byLabel).length === 0) {
+    container.innerHTML = '<p class="empty">No trend data yet. Data will appear after at least one full day of readings.</p>';
+    return;
+  }
+
+  for (const label of Object.keys(byLabel).sort()) {
+    const rows = byLabel[label];
+
+    const wrap = document.createElement("div");
+    wrap.className = "chart-wrap";
+    wrap.innerHTML = `<h2>${label.charAt(0).toUpperCase() + label.slice(1)}</h2><canvas></canvas>`;
+    container.appendChild(wrap);
+
+    const chart = makeChart(wrap.querySelector("canvas").getContext("2d"), label);
+
+    chart.data.datasets = [
+      {
+        label: "Max",
+        data: rows.map(r => ({ x: new Date(r.date), y: r.max_f })),
+        borderColor: COLORS.max,
+        backgroundColor: "transparent",
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+      },
+      {
+        label: "Avg",
+        data: rows.map(r => ({ x: new Date(r.date), y: r.avg_f })),
+        borderColor: COLORS.avg,
+        backgroundColor: "transparent",
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+      },
+      {
+        label: "Min",
+        data: rows.map(r => ({ x: new Date(r.date), y: r.min_f })),
+        borderColor: COLORS.min,
+        backgroundColor: "transparent",
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+      },
+    ];
+    chart.update();
+  }
+}
+
+load();
+</script>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
+
+
 @app.get("/")
 def index():
     html = """<!DOCTYPE html>
@@ -105,7 +254,7 @@ def index():
   </style>
 </head>
 <body>
-  <h1>Govee Monitor</h1>
+  <h1>Smart Home &nbsp;<a href="/trends" style="font-size:.85rem;font-weight:500;color:#2e7dd4;text-decoration:none;">Trends &rarr;</a></h1>
 
   <div class="cards" id="cards"></div>
 
