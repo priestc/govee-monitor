@@ -100,9 +100,17 @@ def trends_page():
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
-    .nav { margin-bottom: 1.5rem; }
+    .nav { margin-bottom: 1rem; }
     .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
     .nav a:hover { text-decoration: underline; }
+    .toolbar { margin-bottom: 1.5rem; }
+    .toggle-btn {
+      background: #fff; color: #4a6080; border: 1px solid #d0dce8;
+      border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem;
+      font-weight: 500; transition: all .15s;
+    }
+    .toggle-btn:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .toggle-btn.active { background: #9b4dca; color: #fff; border-color: #9b4dca; }
     .chart-wrap {
       background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem;
       margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
@@ -114,6 +122,9 @@ def trends_page():
 <body>
   <h1>Temperature Trends</h1>
   <div class="nav"><a href="/">&larr; Back to dashboard</a></div>
+  <div class="toolbar">
+    <button class="toggle-btn" id="maBtn" onclick="toggleMA()">5-day moving average</button>
+  </div>
   <div id="charts"></div>
 
 <script>
@@ -121,7 +132,46 @@ const COLORS = {
   max: "#e07820",
   avg: "#2e7dd4",
   min: "#2a9d6e",
+  ma:  "#9b4dca",
 };
+
+let showMA = false;
+const charts = [];  // {chart, rows} for each sensor
+
+function movingAvg(rows, window) {
+  return rows.map((r, i) => {
+    const slice = rows.slice(Math.max(0, i - window + 1), i + 1);
+    const avg = slice.reduce((s, d) => s + d.avg_f, 0) / slice.length;
+    return { x: toDate(r.date), y: Math.round(avg * 10) / 10 };
+  });
+}
+
+function maDataset(rows) {
+  return {
+    label: "5-day avg",
+    data: movingAvg(rows, 5),
+    borderColor: COLORS.ma,
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderDash: [5, 3],
+    pointRadius: 0,
+    tension: 0.3,
+  };
+}
+
+function toggleMA() {
+  showMA = !showMA;
+  document.getElementById("maBtn").classList.toggle("active", showMA);
+  for (const { chart, rows } of charts) {
+    const existing = chart.data.datasets.findIndex(d => d.label === "5-day avg");
+    if (showMA && existing === -1) {
+      chart.data.datasets.push(maDataset(rows));
+    } else if (!showMA && existing !== -1) {
+      chart.data.datasets.splice(existing, 1);
+    }
+    chart.update();
+  }
+}
 
 function makeChart(ctx, label) {
   return new Chart(ctx, {
@@ -184,6 +234,7 @@ async function load() {
     const chart = makeChart(wrap.querySelector("canvas").getContext("2d"), label);
     chart.options.scales.x.min = xMin;
     chart.options.scales.x.max = xMax;
+    charts.push({ chart, rows });
 
     chart.data.datasets = [
       {
