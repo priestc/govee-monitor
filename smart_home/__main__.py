@@ -344,7 +344,7 @@ def list_presence_devices():
               help="SQLite database path for storing readings.")
 @click.option("--no-db", is_flag=True, help="Disable database logging.")
 def monitor(duration, verbose, db, no_db):
-    """Continuously print readings from nearby H5074 sensors."""
+    """Scan all BLE devices: log sensor readings and track presence."""
     label_map = _labels.load()
     seen: set[str] = set()
     last_temp: dict[str, float] = {}      # address -> last recorded temp_f
@@ -387,6 +387,8 @@ def monitor(duration, verbose, db, no_db):
     conn = None if no_db else open_db(db)
     if conn:
         click.echo(f"Logging to {db}")
+    if presence_devices:
+        click.echo(f"Tracking presence for {len(presence_devices)} device(s).")
 
     def on_reading(reading):
         reading.label = label_map.get(reading.address)
@@ -404,13 +406,13 @@ def monitor(duration, verbose, db, no_db):
                 last_hum[reading.address]  = reading.humidity
                 last_write[reading.address] = now
 
-    click.echo("Scanning for Govee H5074 sensors... (Ctrl+C to stop)")
+    click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
         asyncio.run(scan(
             on_reading,
             duration=duration,
             verbose=verbose,
-            on_device=on_device if presence_devices else None,
+            on_device=on_device,
             extra_tasks=[check_presence()] if presence_devices else None,
         ))
     except KeyboardInterrupt:

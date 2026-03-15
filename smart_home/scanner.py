@@ -18,9 +18,9 @@ async def scan(
     on_device=None,
     extra_tasks: list | None = None,
 ):
-    """Scan for Govee H5074 devices and call callback(Reading) for each update.
+    """Scan all BLE devices. For every device seen, on_device(device, adv) is called.
+    For supported temperature sensors, callback(Reading) is also called.
     If duration is None, scan indefinitely.
-    on_device(device, adv) is called for every BLE device seen (not just Govee).
     extra_tasks is a list of coroutines to run concurrently with the scanner.
     """
     def detection_callback(device: BLEDevice, adv: AdvertisementData):
