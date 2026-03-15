@@ -309,13 +309,31 @@ def list_presence_devices():
         return
 
     state = _presence.load_state()
+    now = datetime.datetime.now()
+
+    def since(ts_str):
+        if not ts_str:
+            return "never"
+        try:
+            dt = datetime.datetime.fromisoformat(ts_str)
+            secs = int((now - dt).total_seconds())
+            if secs < 60:    return f"{secs}s ago"
+            if secs < 3600:  return f"{secs // 60}m ago"
+            if secs < 86400: return f"{secs // 3600}h {(secs % 3600) // 60}m ago"
+            return f"{secs // 86400}d ago"
+        except ValueError:
+            return ts_str
+
     click.echo(f"\n  {'label':<24} {'ble name':<24} {'status':<10} {'last seen'}")
     click.echo("  " + "-" * 76)
     for ble_name, label in sorted(devices.items(), key=lambda x: x[1]):
         s = state.get(ble_name, {})
         status = s.get("status", "unknown")
-        last_seen = s.get("last_seen", "never")
-        click.echo(f"  {label:<24} {ble_name:<24} {status:<10} {last_seen}")
+        last_seen = since(s.get("last_seen"))
+        stale = status == "home" and s.get("last_seen") and \
+            (now - datetime.datetime.fromisoformat(s["last_seen"])).total_seconds() > 300
+        flag = "  (stale?)" if stale else ""
+        click.echo(f"  {label:<24} {ble_name:<24} {status:<10} {last_seen}{flag}")
 
 
 @main.command()
