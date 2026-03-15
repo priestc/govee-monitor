@@ -356,12 +356,31 @@ def monitor(duration, verbose, db, no_db):
     presence_devices = _presence.load_devices()
     presence_last_seen: dict[str, datetime.datetime] = {}
     presence_state = _presence.load_state()
+    presence_addr_map: dict[str, str] = {}  # MAC address -> ble_name (for nameless adverts)
     PRESENCE_TIMEOUT = datetime.timedelta(minutes=5)
 
     def on_device(device, adv):
         ble_name = device.name or adv.local_name or ""
-        if ble_name in presence_devices:
-            presence_last_seen[ble_name] = datetime.datetime.now()
+        now = datetime.datetime.now()
+
+        # Match by name first; if matched, remember this MAC address
+        if ble_name and ble_name in presence_devices:
+            presence_addr_map[device.address] = ble_name
+            presence_last_seen[ble_name] = now
+            if verbose:
+                click.echo(f"[presence] {ble_name!r} seen (by name, addr={device.address})")
+            return
+
+        # Match by previously-seen MAC address (handles nameless advertisements)
+        matched_name = presence_addr_map.get(device.address)
+        if matched_name:
+            presence_last_seen[matched_name] = now
+            if verbose:
+                click.echo(f"[presence] {matched_name!r} seen (by addr={device.address})")
+            return
+
+        if verbose and ble_name:
+            click.echo(f"[presence] untracked: {ble_name!r} ({device.address})")
 
     async def check_presence():
         while True:
