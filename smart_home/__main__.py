@@ -336,6 +336,98 @@ def list_presence_devices():
         click.echo(f"  {label:<24} {ble_name:<24} {status:<10} {last_seen}{flag}")
 
 
+@main.command("presence-history")
+@click.option("--days", "-d", default=7, show_default=True, help="How many days back to analyze.")
+@click.option("--label", "-l", default=None, help="Filter by presence device label.")
+def presence_history(days, label):
+    """Show presence history: away count and time breakdown.
+
+    Example: smart-home presence-history --days 30
+    """
+    entries = _presence.load_history()
+    devices = _presence.load_devices()
+
+    if not entries and not devices:
+        click.echo("No presence devices registered.")
+        return
+    if not entries:
+        click.echo("No presence history recorded yet. The monitor must run to build history.")
+        return
+
+    now = datetime.datetime.now()
+    window_start = now - datetime.timedelta(days=days)
+
+    def fmt_dur(secs):
+        secs = int(secs)
+        if secs < 60:    return f"{secs}s"
+        if secs < 3600:  return f"{secs // 60}m"
+        d, h, m = secs // 86400, (secs % 86400) // 3600, (secs % 3600) // 60
+        if d:  return f"{d}d {h}h" if h else f"{d}d"
+        return f"{h}h {m}m" if m else f"{h}h"
+
+    # Group entries by ble_name
+    by_device: dict[str, list] = {}
+    for e in entries:
+        by_device.setdefault(e["ble_name"], []).append(e)
+
+    # Filter by label if requested
+    if label:
+        by_device = {k: v for k, v in by_device.items()
+                     if v[0]["label"].lower() == label.lower()}
+        if not by_device:
+            click.echo(f"No history found for label '{label}'.")
+            return
+
+    for ble_name, dev_entries in sorted(by_device.items(), key=lambda x: x[1][0]["label"]):
+        dev_label = dev_entries[0]["label"]
+        dev_entries.sort(key=lambda e: e["ts"])
+
+        # Split into before/within the window to determine initial status
+        pre = [e for e in dev_entries if e["ts"] < window_start.isoformat()]
+        in_win = [e for e in dev_entries if e["ts"] >= window_start.isoformat()]
+
+        initial_status = pre[-1]["status"] if pre else "unknown"
+
+        # Build list of (datetime, status) transitions within the window
+        transitions = [(window_start, initial_status)]
+        for e in in_win:
+            transitions.append((datetime.datetime.fromisoformat(e["ts"]), e["status"]))
+        transitions.append((now, None))  # sentinel
+
+        # Build periods: (start, end, status)
+        periods = []
+        for i in range(len(transitions) - 1):
+            start_dt, status = transitions[i]
+            end_dt = transitions[i + 1][0]
+            if status and status != "unknown":
+                periods.append((start_dt, end_dt, status))
+
+        home_secs = sum((e - s).total_seconds() for s, e, st in periods if st == "home")
+        away_secs = sum((e - s).total_seconds() for s, e, st in periods if st == "away")
+        total_secs = home_secs + away_secs
+        away_periods = [(s, e) for s, e, st in periods if st == "away"]
+
+        click.echo(f"\n  {dev_label}  (last {days} day{'s' if days != 1 else ''})")
+        click.echo(f"  {'─' * 50}")
+
+        if total_secs == 0:
+            click.echo("  No data in this window.")
+            continue
+
+        home_pct = 100 * home_secs / total_secs
+        away_pct = 100 * away_secs / total_secs
+        click.echo(f"  Away events : {len(away_periods)}")
+        click.echo(f"  Time home   : {fmt_dur(home_secs):>10}  ({home_pct:.0f}%)")
+        click.echo(f"  Time away   : {fmt_dur(away_secs):>10}  ({away_pct:.0f}%)")
+
+        if away_periods:
+            click.echo(f"\n  Away periods:")
+            for s, e in away_periods:
+                dur = fmt_dur((e - s).total_seconds())
+                end_str = e.strftime("%m-%d %H:%M") if e != now else "now"
+                click.echo(f"    {s.strftime('%m-%d %H:%M')} → {end_str}  ({dur})")
+
+
 @main.command()
 @click.option("--duration", "-d", type=float, default=None,
               help="How many seconds to scan (default: indefinitely).")
@@ -396,6 +488,12 @@ def monitor(duration, verbose, db, no_db):
                 if new_status != old_status:
                     ts = now.strftime("%H:%M:%S")
                     click.echo(f"[{ts}] Presence: {label} is {new_status}")
+                    _presence.append_history({
+                        "ts": now.isoformat(timespec="seconds"),
+                        "ble_name": ble_name,
+                        "label": label,
+                        "status": new_status,
+                    })
                 if new_status != old_status or new_last_seen != old_last_seen:
                     presence_state[ble_name] = {
                         "name": label,
