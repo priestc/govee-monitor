@@ -112,11 +112,27 @@ def recent_readings(label, limit, db):
         click.echo(f"No readings found for label '{label}'.")
         return
     rows = list(reversed(rows))  # show oldest first, most recent at bottom
+    now = datetime.datetime.now()
+
+    def ago(ts_str):
+        try:
+            dt = datetime.datetime.fromisoformat(ts_str)
+        except ValueError:
+            return ""
+        secs = int((now - dt).total_seconds())
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h {(secs % 3600) // 60}m ago"
+        return f"{secs // 86400}d ago"
+
     click.echo(f"\n  Recent readings for: {label}\n")
-    click.echo(f"  {'timestamp':<22} {'temp (°F)':<12} {'humidity'}")
-    click.echo("  " + "-" * 44)
+    click.echo(f"  {'timestamp':<22} {'temp (°F)':<12} {'humidity':<12} {'when'}")
+    click.echo("  " + "-" * 56)
     for ts, temp_f, humidity in rows:
-        click.echo(f"  {ts:<22} {temp_f:<12.1f} {humidity:.1f}%")
+        click.echo(f"  {ts:<22} {temp_f:<12.1f} {humidity:<12.1f} {ago(ts)}")
 
 
 @main.command("sensor-history")
