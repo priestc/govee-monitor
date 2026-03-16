@@ -1,15 +1,21 @@
 import SwiftUI
 
 struct ContentView: View {
-    @AppStorage("serverURL") private var serverURL = ""
+    @AppStorage("localURL")    private var localURL    = ""
+    @AppStorage("tailscaleURL") private var tailscaleURL = ""
     @State private var status: String? = nil
     @State private var isRegistering = false
 
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Server")) {
-                    TextField("http://192.168.1.231:5000", text: $serverURL)
+                Section(header: Text("Server"), footer: Text("Local is used when on home WiFi. Tailscale is used when away. Registration is attempted on both.")) {
+                    TextField("192.168.1.231:5000", text: $localURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .listRowSeparator(.visible)
+                    TextField("100.x.x.x:5000  (Tailscale IP)", text: $tailscaleURL)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -26,7 +32,7 @@ struct ContentView: View {
                             Text("Register for Notifications")
                         }
                     }
-                    .disabled(serverURL.isEmpty || isRegistering)
+                    .disabled((localURL.isEmpty && tailscaleURL.isEmpty) || isRegistering)
                 }
 
                 if let status {
@@ -45,12 +51,19 @@ struct ContentView: View {
             }
             .navigationTitle("Smart Home")
         }
-        // Auto-register when a fresh token arrives (e.g. first launch)
         .onReceive(NotificationCenter.default.publisher(for: .apnsTokenReceived)) { _ in
-            if !serverURL.isEmpty {
+            if !localURL.isEmpty || !tailscaleURL.isEmpty {
                 registerDevice()
             }
         }
+    }
+
+    private func normalizeURL(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty else { return nil }
+        if !s.hasPrefix("http") { s = "http://" + s }
+        if s.hasSuffix("/") { s = String(s.dropLast()) }
+        return s
     }
 
     private func registerDevice() {
@@ -59,34 +72,53 @@ struct ContentView: View {
             return
         }
 
-        var urlStr = serverURL.trimmingCharacters(in: .whitespaces)
-        if !urlStr.hasPrefix("http") { urlStr = "http://" + urlStr }
-        if urlStr.hasSuffix("/") { urlStr = String(urlStr.dropLast()) }
-
-        guard let url = URL(string: "\(urlStr)/api/register-push-token") else {
-            status = "Invalid server URL."
+        let candidates = [localURL, tailscaleURL].compactMap { normalizeURL($0) }
+        guard !candidates.isEmpty else {
+            status = "Enter at least one server URL."
             return
         }
 
         isRegistering = true
         status = nil
 
-        var request = URLRequest(url: url, timeoutInterval: 10)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token])
+        let body = try? JSONSerialization.data(withJSONObject: ["token": token])
+        let group = DispatchGroup()
+        var successes: [String] = []
+        var failures:  [String] = []
+        let lock = NSLock()
 
-        URLSession.shared.dataTask(with: request) { _, response, error in
-            DispatchQueue.main.async {
-                isRegistering = false
-                if let error {
-                    status = "Error: \(error.localizedDescription)"
-                } else if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    status = "✓ Registered — you'll be notified when you leave home."
-                } else {
-                    status = "Server error. Check the URL and try again."
-                }
+        for urlStr in candidates {
+            guard let url = URL(string: "\(urlStr)/api/register-push-token") else {
+                lock.lock(); failures.append(urlStr); lock.unlock()
+                continue
             }
-        }.resume()
+            var request = URLRequest(url: url, timeoutInterval: 10)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+
+            group.enter()
+            URLSession.shared.dataTask(with: request) { _, response, error in
+                lock.lock()
+                if error == nil, let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                    successes.append(urlStr)
+                } else {
+                    failures.append(urlStr)
+                }
+                lock.unlock()
+                group.leave()
+            }.resume()
+        }
+
+        group.notify(queue: .main) {
+            isRegistering = false
+            if successes.isEmpty {
+                status = "Could not reach any server. Check URLs and try again."
+            } else if successes.count == candidates.count {
+                status = "✓ Registered on all \(successes.count) server URL(s)."
+            } else {
+                status = "✓ Registered on \(successes.count) of \(candidates.count) URLs (local may be unreachable when away)."
+            }
+        }
     }
 }
