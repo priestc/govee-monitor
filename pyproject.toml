@@ -11,6 +11,7 @@ dependencies = [
     "bleak>=0.21.0",
     "click>=8.0",
     "flask>=3.0",
+    "flask-compress>=1.14",
     "httpx[http2]>=0.27",
     "PyJWT[crypto]>=2.0",
 ]
