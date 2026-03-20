@@ -144,35 +144,22 @@ def minmax_tod():
     with _conn() as conn:
         rows = conn.execute("""
             SELECT
-                sub.date,
-                sub.label,
-                ROUND(CAST(strftime('%H', sub.min_ts) AS REAL)
-                      + CAST(strftime('%M', sub.min_ts) AS REAL) / 60.0, 2) AS min_hour,
-                ROUND(CAST(strftime('%H', sub.max_ts) AS REAL)
-                      + CAST(strftime('%M', sub.max_ts) AS REAL) / 60.0, 2) AS max_hour
+                DATE(ts) AS date,
+                label,
+                ROUND(CAST(strftime('%H', MIN(CASE WHEN temp_f = day_min THEN ts END)) AS REAL)
+                    + CAST(strftime('%M', MIN(CASE WHEN temp_f = day_min THEN ts END)) AS REAL) / 60.0, 2) AS min_hour,
+                ROUND(CAST(strftime('%H', MIN(CASE WHEN temp_f = day_max THEN ts END)) AS REAL)
+                    + CAST(strftime('%M', MIN(CASE WHEN temp_f = day_max THEN ts END)) AS REAL) / 60.0, 2) AS max_hour
             FROM (
-                SELECT
-                    agg.date,
-                    agg.label,
-                    MIN(rmin.ts) AS min_ts,
-                    MIN(rmax.ts) AS max_ts
-                FROM (
-                    SELECT DATE(ts) AS date, label,
-                           MIN(temp_f) AS min_f, MAX(temp_f) AS max_f
-                    FROM readings
-                    WHERE temp_f IS NOT NULL AND label IS NOT NULL
-                      AND ts >= DATE('now', '-1 year')
-                    GROUP BY DATE(ts), label
-                ) agg
-                JOIN readings rmin
-                  ON DATE(rmin.ts) = agg.date AND rmin.label = agg.label
-                 AND rmin.temp_f = agg.min_f
-                JOIN readings rmax
-                  ON DATE(rmax.ts) = agg.date AND rmax.label = agg.label
-                 AND rmax.temp_f = agg.max_f
-                GROUP BY agg.date, agg.label
-            ) sub
-            ORDER BY sub.date ASC
+                SELECT ts, label, temp_f,
+                    MIN(temp_f) OVER (PARTITION BY DATE(ts), label) AS day_min,
+                    MAX(temp_f) OVER (PARTITION BY DATE(ts), label) AS day_max
+                FROM readings
+                WHERE temp_f IS NOT NULL AND label IS NOT NULL
+                  AND ts >= DATE('now', '-1 year')
+            )
+            GROUP BY DATE(ts), label
+            ORDER BY date ASC
         """).fetchall()
     return jsonify([dict(r) for r in rows])
 
