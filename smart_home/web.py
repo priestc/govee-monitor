@@ -421,6 +421,196 @@ loadTOD();
     return Response(html, mimetype="text/html")
 
 
+_CHART_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CHART_TITLE &mdash; Smart Home</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
+    .nav { margin-bottom: 1.5rem; }
+    .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .chart-wrap { background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); }
+    .chart-wrap h2 { font-size: 0.85rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 1rem; }
+    .range-btns { margin-bottom: 1.5rem; display: flex; gap: .4rem; flex-wrap: wrap; }
+    .range-btns button { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
+    .range-btns button:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .range-btns button.active { background: #e07820; color: #fff; border-color: #e07820; }
+  </style>
+</head>
+<body>
+  <h1>CHART_TITLE</h1>
+  <div class="nav"><a href="/">&larr; Dashboard</a></div>
+  <div class="range-btns">
+    <button onclick="setRange(0.125)">3h</button>
+    <button onclick="setRange(1)" class="active">24h</button>
+    <button onclick="setRange(3)">3d</button>
+    <button onclick="setRange(7)">7d</button>
+    <button onclick="setRange(30)">30d</button>
+  </div>
+  CHART_CANVAS
+<script>
+const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b"];
+const colorMap = {};
+function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
+let rangeDays = 1;
+function localISO(d) {
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+async function loadColors() {
+  const data = await fetch("/api/current").then(r => r.json());
+  data.map(s => s.label).filter(Boolean).sort()
+    .forEach((lbl, i) => { colorMap[lbl] = COLORS[i % COLORS.length]; });
+}
+function setRange(days) {
+  rangeDays = days;
+  document.querySelectorAll(".range-btns button").forEach((b,i) => {
+    b.classList.toggle("active", [0.125,1,3,7,30][i] === days);
+  });
+  loadChart();
+}
+CHART_JS
+loadColors().then(loadChart);
+setInterval(() => loadColors().then(loadChart), 30000);
+</script>
+</body>
+</html>"""
+
+
+def _chart_page(title, canvas, js):
+    return Response(
+        _CHART_PAGE
+            .replace("CHART_TITLE", title)
+            .replace("CHART_CANVAS", canvas)
+            .replace("CHART_JS", js),
+        mimetype="text/html",
+    )
+
+
+_HISTORY_FETCH = """\
+  const start = localISO(new Date(Date.now() - rangeDays * 86400000));
+  const bucket = ({0.125:1,1:2,3:10,7:20,30:60})[rangeDays] || 1;
+  const data = await fetch(`/api/history?start=${start}&limit=8000&bucket_minutes=${bucket}`).then(r => r.json());
+  const xMin = new Date(Date.now() - rangeDays * 86400000), xMax = new Date();
+  const timeUnit = rangeDays >= 3 ? "day" : "hour";"""
+
+_AXIS_UPDATE = """\
+  chart.options.scales.x.min = xMin;
+  chart.options.scales.x.max = xMax;
+  chart.options.scales.x.time.unit = timeUnit;
+  chart.update();"""
+
+
+@app.get("/chart/temperature")
+def chart_temperature():
+    return _chart_page(
+        "Temperature",
+        '<div class="chart-wrap"><h2>Temperature (\u00b0F)</h2><canvas id="chart" height="120"></canvas></div>',
+        """
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line", data: { datasets: [] },
+  options: {
+    animation: false, parsing: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: "#4a6080" } } },
+    scales: {
+      x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 8 }, grid: { color: "#e8eef4" } },
+      y: { ticks: { color: "#7a90a8", callback: v => v + "\u00b0F" }, grid: { color: "#e8eef4" } }
+    }
+  }
+});
+async function loadChart() {
+""" + _HISTORY_FETCH + """
+  const byLabel = {};
+  for (const row of data) (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.temp_f });
+  for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
+  chart.data.datasets = Object.keys(byLabel).sort().map(lbl => ({
+    label: lbl, data: byLabel[lbl], borderColor: labelColor(lbl),
+    backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0,
+  }));
+""" + _AXIS_UPDATE + """
+}""",
+    )
+
+
+@app.get("/chart/humidity")
+def chart_humidity():
+    return _chart_page(
+        "Humidity",
+        '<div class="chart-wrap"><h2>Humidity (%)</h2><canvas id="chart" height="120"></canvas></div>',
+        """
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line", data: { datasets: [] },
+  options: {
+    animation: false, parsing: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: "#4a6080" } } },
+    scales: {
+      x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 8 }, grid: { color: "#e8eef4" } },
+      y: { ticks: { color: "#7a90a8", callback: v => v + "%" }, grid: { color: "#e8eef4" } }
+    }
+  }
+});
+async function loadChart() {
+""" + _HISTORY_FETCH + """
+  const byLabel = {};
+  for (const row of data) (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.humidity });
+  for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
+  chart.data.datasets = Object.keys(byLabel).sort().map(lbl => ({
+    label: lbl, data: byLabel[lbl], borderColor: labelColor(lbl),
+    backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0,
+  }));
+""" + _AXIS_UPDATE + """
+}""",
+    )
+
+
+@app.get("/chart/differential")
+def chart_differential():
+    return _chart_page(
+        "Inside / Outside Differential",
+        '<div class="chart-wrap"><h2>Inside \u2212 Outside (\u00b0F)</h2><canvas id="chart" height="120"></canvas></div>',
+        """
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line", data: { datasets: [] },
+  options: {
+    animation: false, parsing: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 8 }, grid: { color: "#e8eef4" } },
+      y: { ticks: { color: "#7a90a8", callback: v => v + "\u00b0F" }, grid: { color: ctx => ctx.tick.value === 0 ? "#aabbc8" : "#e8eef4" } }
+    }
+  }
+});
+async function loadChart() {
+""" + _HISTORY_FETCH + """
+  const labels = [...new Set(data.map(r => r.label))];
+  const insideLabel  = labels.find(l => l && l.toLowerCase() === "inside");
+  const outsideLabel = labels.find(l => l && l.toLowerCase() === "outside");
+  if (!insideLabel || !outsideLabel) { chart.data.datasets = []; chart.update(); return; }
+  const outsideMap = new Map();
+  for (const row of data)
+    if (row.label === outsideLabel && row.temp_f != null) outsideMap.set(row.ts, row.temp_f);
+  const diffData = [];
+  for (const row of data)
+    if (row.label === insideLabel && row.temp_f != null && outsideMap.has(row.ts))
+      diffData.push({ x: new Date(row.ts), y: Math.round((row.temp_f - outsideMap.get(row.ts)) * 10) / 10 });
+  diffData.sort((a,b) => a.x - b.x);
+  chart.data.datasets = [{ label: "Inside \u2212 Outside", data: diffData, borderColor: "#9b4dca", backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0 }];
+""" + _AXIS_UPDATE + """
+}""",
+    )
+
+
 @app.get("/")
 def index():
     html = """<!DOCTYPE html>
@@ -428,254 +618,57 @@ def index():
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Govee Monitor</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <title>Smart Home</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem; color: #1a2535; letter-spacing: -.02em; }
     .cards { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
-    .card {
-      background: #fff; border-radius: 12px; padding: 1.1rem 1.5rem; min-width: 190px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
-    }
+    .card { background: #fff; border-radius: 12px; padding: 1.1rem 1.5rem; min-width: 190px; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); }
     .card .label { font-size: 0.75rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
     .card .temp  { font-size: 2.4rem; font-weight: 700; color: #e07820; margin: .2rem 0 .1rem; line-height: 1; }
     .card .hum   { font-size: 1rem; color: #2e7dd4; font-weight: 500; }
     .card .ts    { font-size: 0.72rem; color: #aabbc8; margin-top: .5rem; }
-    .chart-wrap  {
-      background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem;
-      margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
-    }
-    .chart-wrap h2 { font-size: 0.85rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 1rem; }
     .presence-cards { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
-    .presence-card {
-      background: #fff; border-radius: 12px; padding: 1rem 1.5rem; min-width: 160px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05);
-      display: flex; align-items: center; gap: .9rem;
-    }
+    .presence-card { background: #fff; border-radius: 12px; padding: 1rem 1.5rem; min-width: 160px; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); display: flex; align-items: center; gap: .9rem; }
     .presence-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
     .presence-dot.home { background: #2a9d6e; }
     .presence-dot.away { background: #c0392b; }
     .presence-dot.unknown { background: #aabbc8; }
     .presence-info .name { font-size: .85rem; font-weight: 600; color: #1a2535; }
     .presence-info .status { font-size: .75rem; color: #7a90a8; margin-top: .15rem; }
-    .range-btns  { margin-bottom: 1.5rem; display: flex; gap: .4rem; flex-wrap: wrap; }
-    .range-btns button {
-      background: #fff; color: #4a6080; border: 1px solid #d0dce8;
-      border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem;
-      font-weight: 500; transition: all .15s;
-    }
-    .range-btns button:hover { background: #f0f4f8; border-color: #aabbc8; }
-    .range-btns button.active { background: #e07820; color: #fff; border-color: #e07820; }
+    .section-title { font-size: .75rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-bottom: .75rem; }
+    .chart-links { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+    .chart-link { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; background: #fff; border-radius: 12px; padding: 1rem 1.5rem; min-width: 220px; text-decoration: none; color: #1a2535; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); transition: box-shadow .15s, transform .15s; }
+    .chart-link:hover { box-shadow: 0 2px 8px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.08); transform: translateY(-1px); }
+    .chart-link .cl-title { font-size: .9rem; font-weight: 600; }
+    .chart-link .cl-arrow { color: #aabbc8; font-size: 1.1rem; }
   </style>
 </head>
 <body>
   <h1>Smart Home &nbsp;<a href="/trends" style="font-size:.85rem;font-weight:500;color:#2e7dd4;text-decoration:none;">Trends &rarr;</a></h1>
 
   <div class="cards" id="cards"></div>
-
   <div class="presence-cards" id="presence-cards"></div>
 
-  <div class="range-btns">
-    <button onclick="setRange(0.125)" >3h</button>
-    <button onclick="setRange(1)"  class="active">24h</button>
-    <button onclick="setRange(3)"  >3d</button>
-    <button onclick="setRange(7)"  >7d</button>
-    <button onclick="setRange(30)" >30d</button>
-  </div>
-
-  <div class="chart-wrap">
-    <h2>Temperature (°F)</h2>
-    <canvas id="tempChart" height="90"></canvas>
-  </div>
-
-  <div class="chart-wrap">
-    <h2>Humidity (%)</h2>
-    <canvas id="humChart" height="90"></canvas>
-  </div>
-
-  <div class="chart-wrap" id="diffWrap" style="display:none">
-    <h2>Inside / Outside Differential (°F)</h2>
-    <canvas id="diffChart" height="90"></canvas>
+  <div class="section-title">Charts</div>
+  <div class="chart-links">
+    <a href="/chart/temperature" class="chart-link"><span class="cl-title">Temperature</span><span class="cl-arrow">&#8594;</span></a>
+    <a href="/chart/humidity"    class="chart-link"><span class="cl-title">Humidity</span><span class="cl-arrow">&#8594;</span></a>
+    <a href="/chart/differential" class="chart-link"><span class="cl-title">Inside / Outside Differential</span><span class="cl-arrow">&#8594;</span></a>
   </div>
 
 <script>
-const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b"];
-const colorMap = {};
-
-function labelColor(lbl) {
-  return colorMap[lbl] ?? COLORS[0];
-}
-let tempChart, humChart, diffChart, rangeDays = 1;
-
-const tempCtx = document.getElementById("tempChart").getContext("2d");
-const humCtx  = document.getElementById("humChart").getContext("2d");
-const diffCtx = document.getElementById("diffChart").getContext("2d");
-
-function makeChart(ctx, label, yLabel) {
-  return new Chart(ctx, {
-    type: "line",
-    data: { datasets: [] },
-    options: {
-      animation: false,
-      parsing: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { color: "#4a6080" } } },
-      scales: {
-        x: {
-          type: "time",
-          time: { tooltipFormat: "MMM d, h:mm a" },
-          ticks: { color: "#7a90a8", maxTicksLimit: 8 },
-          grid:  { color: "#e8eef4" }
-        },
-        y: {
-          ticks: { color: "#7a90a8" },
-          grid:  { color: "#e8eef4" },
-          title: { display: false }
-        }
-      }
-    }
-  });
-}
-
-function setRange(days) {
-  rangeDays = days;
-  document.querySelectorAll(".range-btns button").forEach((b,i) => {
-    b.classList.toggle("active", [0.125,1,3,7,30][i] === days);
-  });
-  loadCharts();
-}
-
 async function loadCurrent() {
   const data = await fetch("/api/current").then(r => r.json());
-  // assign colors by sorted label position so they're consistent across all charts
-  data.map(s => s.label).filter(Boolean).sort()
-    .forEach((lbl, i) => { colorMap[lbl] = COLORS[i % COLORS.length]; });
-  const el = document.getElementById("cards");
-  el.innerHTML = data.map(s => `
+  document.getElementById("cards").innerHTML = data.map(s => `
     <div class="card">
       <div class="label">${s.label || s.address}</div>
-      <div class="temp">${s.temp_f.toFixed(1)}°F</div>
+      <div class="temp">${s.temp_f.toFixed(1)}&deg;F</div>
       <div class="hum">${s.humidity.toFixed(1)}% RH</div>
       <div class="ts">${new Date(s.ts).toLocaleString()}</div>
     </div>`).join("");
 }
-
-function localISO(date) {
-  const p = n => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${p(date.getMonth()+1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`;
-}
-
-async function loadCharts() {
-  const start = localISO(new Date(Date.now() - rangeDays * 86400000));
-  const bucketMap = { 0.125: 1, 1: 2, 3: 10, 7: 20, 30: 60 };
-  const bucket = bucketMap[rangeDays] || 1;
-  const data  = await fetch(`/api/history?start=${start}&limit=8000&bucket_minutes=${bucket}`).then(r => r.json());
-
-  // group by label, sort ascending
-  const byLabel = {};
-  for (const row of data) {
-    (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.temp_f, h: row.humidity });
-  }
-  for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
-
-  const labels = Object.keys(byLabel).sort();
-
-  tempChart.data.datasets = labels.map(lbl => ({
-    label: lbl,
-    data: byLabel[lbl].map(p => ({ x: p.x, y: p.y })),
-    borderColor: labelColor(lbl),
-    backgroundColor: "transparent",
-    borderWidth: 1.5,
-    pointRadius: 0,
-    tension: 0,
-  }));
-
-  humChart.data.datasets = labels.map(lbl => ({
-    label: lbl,
-    data: byLabel[lbl].map(p => ({ x: p.x, y: p.h })),
-    borderColor: labelColor(lbl),
-    backgroundColor: "transparent",
-    borderWidth: 1.5,
-    pointRadius: 0,
-    tension: 0,
-  }));
-
-  const xMin = new Date(Date.now() - rangeDays * 86400000);
-  const xMax = new Date();
-  const timeUnit = rangeDays >= 3 ? "day" : "hour";
-  for (const chart of [tempChart, humChart]) {
-    chart.options.scales.x.min = xMin;
-    chart.options.scales.x.max = xMax;
-    chart.options.scales.x.time.unit = timeUnit;
-  }
-
-  // Inside / Outside differential
-  const insideLabel  = Object.keys(byLabel).find(l => l.toLowerCase() === "inside");
-  const outsideLabel = Object.keys(byLabel).find(l => l.toLowerCase() === "outside");
-  const diffWrap = document.getElementById("diffWrap");
-  if (insideLabel && outsideLabel) {
-    const outsideMap = new Map();
-    for (const row of data) {
-      if (row.label === outsideLabel && row.temp_f != null) outsideMap.set(row.ts, row.temp_f);
-    }
-    const diffData = [];
-    for (const row of data) {
-      if (row.label === insideLabel && row.temp_f != null) {
-        const outTemp = outsideMap.get(row.ts);
-        if (outTemp != null) diffData.push({ x: new Date(row.ts), y: Math.round((row.temp_f - outTemp) * 10) / 10 });
-      }
-    }
-    diffData.sort((a, b) => a.x - b.x);
-    diffChart.data.datasets = [{
-      label: "Inside − Outside",
-      data: diffData,
-      borderColor: "#9b4dca",
-      backgroundColor: "transparent",
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0,
-    }];
-    diffChart.options.scales.x.min = xMin;
-    diffChart.options.scales.x.max = xMax;
-    diffChart.options.scales.x.time.unit = timeUnit;
-    diffChart.update();
-    diffWrap.style.display = "";
-  } else {
-    diffWrap.style.display = "none";
-  }
-
-  tempChart.update();
-  humChart.update();
-}
-
-tempChart = makeChart(tempCtx, "Temperature (°F)");
-humChart  = makeChart(humCtx,  "Humidity (%)");
-diffChart = new Chart(diffCtx, {
-  type: "line",
-  data: { datasets: [] },
-  options: {
-    animation: false,
-    parsing: false,
-    interaction: { mode: "index", intersect: false },
-    plugins: { legend: { display: false } },
-    scales: {
-      x: {
-        type: "time",
-        time: { tooltipFormat: "MMM d, h:mm a" },
-        ticks: { color: "#7a90a8", maxTicksLimit: 8 },
-        grid:  { color: "#e8eef4" }
-      },
-      y: {
-        ticks: { color: "#7a90a8", callback: v => v + "°F" },
-        grid:  { color: ctx => ctx.tick.value === 0 ? "#aabbc8" : "#e8eef4" }
-      }
-    }
-  }
-});
-
 async function loadPresence() {
   const data = await fetch("/api/presence").then(r => r.json());
   const el = document.getElementById("presence-cards");
@@ -691,16 +684,14 @@ async function loadPresence() {
     </div>`;
   }).join("");
 }
-
 function timeSince(date) {
   const s = Math.floor((Date.now() - date) / 1000);
-  if (s < 60)   return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  if (s < 60)    return `${s}s ago`;
+  if (s < 3600)  return `${Math.floor(s/60)}m ago`;
   if (s < 86400) return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ago`;
   return `${Math.floor(s/86400)}d ago`;
 }
-
-loadCurrent().then(loadCharts);
+loadCurrent();
 loadPresence();
 setInterval(loadCurrent, 30000);
 setInterval(loadPresence, 30000);
