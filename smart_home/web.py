@@ -279,6 +279,7 @@ function makeChart(ctx, label) {
     options: {
       animation: false,
       parsing: false,
+      interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: "#4a6080" } },
         title: { display: false }
@@ -505,6 +506,7 @@ function makeChart(ctx, label, yLabel) {
     options: {
       animation: false,
       parsing: false,
+      interaction: { mode: "index", intersect: false },
       plugins: { legend: { labels: { color: "#4a6080" } } },
       scales: {
         x: {
@@ -642,6 +644,7 @@ diffChart = new Chart(diffCtx, {
   options: {
     animation: false,
     parsing: false,
+    interaction: { mode: "index", intersect: false },
     plugins: { legend: { display: false } },
     scales: {
       x: {
