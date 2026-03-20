@@ -137,6 +137,46 @@ def trends():
     return jsonify([dict(r) for r in rows])
 
 
+@app.get("/api/minmax-tod")
+def minmax_tod():
+    """For each day and label, the time-of-day (decimal hour) when the daily
+    min and max temperature occurred."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                sub.date,
+                sub.label,
+                ROUND(CAST(strftime('%H', sub.min_ts) AS REAL)
+                      + CAST(strftime('%M', sub.min_ts) AS REAL) / 60.0, 2) AS min_hour,
+                ROUND(CAST(strftime('%H', sub.max_ts) AS REAL)
+                      + CAST(strftime('%M', sub.max_ts) AS REAL) / 60.0, 2) AS max_hour
+            FROM (
+                SELECT
+                    agg.date,
+                    agg.label,
+                    MIN(rmin.ts) AS min_ts,
+                    MIN(rmax.ts) AS max_ts
+                FROM (
+                    SELECT DATE(ts) AS date, label,
+                           MIN(temp_f) AS min_f, MAX(temp_f) AS max_f
+                    FROM readings
+                    WHERE temp_f IS NOT NULL AND label IS NOT NULL
+                      AND ts >= DATE('now', '-1 year')
+                    GROUP BY DATE(ts), label
+                ) agg
+                JOIN readings rmin
+                  ON DATE(rmin.ts) = agg.date AND rmin.label = agg.label
+                 AND rmin.temp_f = agg.min_f
+                JOIN readings rmax
+                  ON DATE(rmax.ts) = agg.date AND rmax.label = agg.label
+                 AND rmax.temp_f = agg.max_f
+                GROUP BY agg.date, agg.label
+            ) sub
+            ORDER BY sub.date ASC
+        """).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
 @app.get("/trends")
 def trends_page():
     html = """<!DOCTYPE html>
@@ -177,6 +217,10 @@ def trends_page():
     <button class="toggle-btn" id="maBtn" onclick="toggleMA()">5-day moving average</button>
   </div>
   <div id="charts"></div>
+
+  <h1 style="margin-top:2rem;margin-bottom:1rem">Daily Min/Max Hour</h1>
+  <p style="font-size:.85rem;color:#7a90a8;margin-bottom:1.5rem">Time of day when the daily minimum and maximum temperature was recorded.</p>
+  <div id="tod-charts"></div>
 
 <script>
 const COLORS = {
@@ -288,7 +332,96 @@ async function load() {
   }
 }
 
+function fmtHour(v) {
+  const h = Math.floor(v), m = Math.round((v - h) * 60);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
+}
+
+function makeTODChart(ctx) {
+  return new Chart(ctx, {
+    type: "line",
+    data: { datasets: [] },
+    options: {
+      animation: false,
+      parsing: false,
+      plugins: {
+        legend: { labels: { color: "#4a6080" } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtHour(ctx.parsed.y)}` } }
+      },
+      scales: {
+        x: {
+          type: "time",
+          time: { unit: "month", tooltipFormat: "MMM d, yyyy" },
+          ticks: { color: "#7a90a8", maxTicksLimit: 12 },
+          grid:  { color: "#e8eef4" }
+        },
+        y: {
+          min: 0, max: 24,
+          ticks: {
+            stepSize: 6,
+            color: "#7a90a8",
+            callback: v => fmtHour(v)
+          },
+          grid: { color: ctx => ctx.tick.value === 12 ? "#c8d8e8" : "#e8eef4" }
+        }
+      }
+    }
+  });
+}
+
+async function loadTOD() {
+  const data = await fetch("/api/minmax-tod").then(r => r.json());
+  const container = document.getElementById("tod-charts");
+
+  const byLabel = {};
+  for (const row of data) {
+    (byLabel[row.label] ??= []).push(row);
+  }
+
+  if (Object.keys(byLabel).length === 0) {
+    container.innerHTML = '<p class="empty">No data yet.</p>';
+    return;
+  }
+
+  const allDates = data.map(r => toDate(r.date));
+  const xMin = new Date(Math.min(...allDates));
+  const xMax = new Date(Math.max(...allDates));
+
+  for (const label of Object.keys(byLabel).sort()) {
+    const rows = byLabel[label];
+
+    const wrap = document.createElement("div");
+    wrap.className = "chart-wrap";
+    wrap.innerHTML = `<h2>${label.charAt(0).toUpperCase() + label.slice(1)}</h2><canvas></canvas>`;
+    container.appendChild(wrap);
+
+    const chart = makeTODChart(wrap.querySelector("canvas").getContext("2d"));
+    chart.options.scales.x.min = xMin;
+    chart.options.scales.x.max = xMax;
+    chart.data.datasets = [
+      {
+        label: "Time of daily max",
+        data: rows.map(r => ({ x: toDate(r.date), y: r.max_hour })),
+        borderColor: "#e07820",
+        backgroundColor: "transparent",
+        borderWidth: 1.5, pointRadius: 0, tension: 0,
+      },
+      {
+        label: "Time of daily min",
+        data: rows.map(r => ({ x: toDate(r.date), y: r.min_hour })),
+        borderColor: "#2e7dd4",
+        backgroundColor: "transparent",
+        borderWidth: 1.5, pointRadius: 0, tension: 0,
+      },
+    ];
+    chart.update();
+  }
+}
+
 load();
+loadTOD();
 </script>
 </body>
 </html>"""
