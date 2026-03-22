@@ -765,6 +765,13 @@ _TEMP_PAGE = """\
   <h1>Temperature</h1>
   <div class="nav"><a href="/">&larr; Dashboard</a></div>
   <div class="btn-group">
+    <div class="range-btns" id="sensor-btns">
+      <button onclick="toggleSensor('Inside', this)" class="active">Inside</button>
+      <button onclick="toggleSensor('Outside', this)" class="active">Outside</button>
+      <button onclick="toggleDifferential(this)" id="btn-diff">Differential</button>
+    </div>
+  </div>
+  <div class="btn-group">
     <div class="btn-group-label">Most Recent</div>
     <div class="range-btns" id="recent-btns">
       <button onclick="setRange(0.125)">3h</button>
@@ -797,6 +804,76 @@ const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d3
 const colorMap = {};
 function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
 let mode = "recent", rangeDays = 1, activeMonth = null;
+const hiddenLabels = new Set();
+let showDifferential = false;
+function toggleSensor(name, btn) {
+  if (hiddenLabels.has(name)) { hiddenLabels.delete(name); btn.classList.add("active"); }
+  else { hiddenLabels.add(name); btn.classList.remove("active"); }
+  chart.data.datasets.forEach(ds => {
+    if (ds.label.toLowerCase().includes(name.toLowerCase())) ds.hidden = hiddenLabels.has(name);
+  });
+  chart.update();
+}
+function toggleDifferential(btn) {
+  showDifferential = !showDifferential;
+  btn.classList.toggle("active", showDifferential);
+  if (showDifferential) {
+    ["Inside","Outside"].forEach(name => {
+      hiddenLabels.add(name);
+      document.querySelectorAll("#sensor-btns button").forEach(b => {
+        if (b.textContent === name) b.classList.remove("active");
+      });
+    });
+  } else {
+    ["Inside","Outside"].forEach(name => {
+      hiddenLabels.delete(name);
+      document.querySelectorAll("#sensor-btns button").forEach(b => {
+        if (b.textContent === name) b.classList.add("active");
+      });
+    });
+  }
+  loadChart();
+}
+function applyHidden() {
+  chart.data.datasets.forEach(ds => {
+    ds.hidden = [...hiddenLabels].some(n => ds.label.toLowerCase().includes(n.toLowerCase()));
+  });
+}
+function addDiffDatasets(data, isMonth) {
+  if (!showDifferential) return;
+  if (isMonth) {
+    const yearMap = {};
+    for (const row of data) {
+      yearMap[row.year] ??= {};
+      yearMap[row.year][row.ts] ??= {};
+      if (row.label.toLowerCase().includes("inside"))  yearMap[row.year][row.ts].inside  = row.temp_f;
+      if (row.label.toLowerCase().includes("outside")) yearMap[row.year][row.ts].outside = row.temp_f;
+    }
+    Object.entries(yearMap).sort().forEach(([year, tsMap], i) => {
+      const pts = Object.entries(tsMap)
+        .filter(([,v]) => v.inside != null && v.outside != null)
+        .map(([ts,v]) => ({ x: new Date(ts), y: +(v.inside - v.outside).toFixed(1) }))
+        .sort((a,b) => a.x - b.x);
+      chart.data.datasets.push({ label: `Differential ${year}`, data: pts,
+        borderColor: COLORS[i % COLORS.length], backgroundColor: "transparent",
+        borderWidth: 1.5, pointRadius: 0, tension: 0 });
+    });
+  } else {
+    const tsMap = {};
+    for (const row of data) {
+      tsMap[row.ts] ??= {};
+      if (row.label.toLowerCase().includes("inside"))  tsMap[row.ts].inside  = row.temp_f;
+      if (row.label.toLowerCase().includes("outside")) tsMap[row.ts].outside = row.temp_f;
+    }
+    const pts = Object.entries(tsMap)
+      .filter(([,v]) => v.inside != null && v.outside != null)
+      .map(([ts,v]) => ({ x: new Date(ts), y: +(v.inside - v.outside).toFixed(1) }))
+      .sort((a,b) => a.x - b.x);
+    chart.data.datasets.push({ label: "Differential", data: pts,
+      borderColor: "#9b4dca", backgroundColor: "transparent",
+      borderWidth: 1.5, pointRadius: 0, tension: 0 });
+  }
+}
 
 function localISO(d) {
   const p = n => String(n).padStart(2,'0');
@@ -852,6 +929,7 @@ async function loadChart() {
     chart.options.scales.x.min = xMin;
     chart.options.scales.x.max = xMax;
     chart.options.scales.x.time.unit = timeUnit;
+    addDiffDatasets(data, false);
   } else {
     const data = await fetch(`/api/history/month?month=${activeMonth}&bucket_minutes=60`).then(r => r.json());
     const byKey = {};
@@ -869,7 +947,9 @@ async function loadChart() {
     chart.options.scales.x.min = xMin;
     chart.options.scales.x.max = xMax;
     chart.options.scales.x.time.unit = "day";
+    addDiffDatasets(data, true);
   }
+  applyHidden();
   chart.update();
 }
 loadColors().then(loadChart);
