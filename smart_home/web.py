@@ -173,16 +173,48 @@ def history():
                 ROUND(AVG(rssi), 0)    AS rssi
             FROM readings{where_sql}
             GROUP BY CAST(strftime('%s', ts) AS INTEGER) / {bucket_secs}, label
-            ORDER BY ts DESC LIMIT ?
+            ORDER BY ts ASC LIMIT ?
         """
     else:
-        sql = f"SELECT ts, label, temp_f, humidity, rssi FROM readings{where_sql} ORDER BY ts DESC"
+        sql = f"SELECT ts, label, temp_f, humidity, rssi FROM readings{where_sql} ORDER BY ts ASC"
 
     if bucket > 1:
         params.append(limit)
     with _conn() as conn:
         rows = conn.execute(sql, params).fetchall()
     return jsonify([dict(r) for r in rows])
+
+
+@app.get("/api/history/month")
+def history_month():
+    """All temperature readings for a given calendar month across all years.
+    Returns rows with ts normalized to year 2000 so all years overlay on the same axis.
+    Query params: month (1-12), bucket_minutes (default 60).
+    """
+    import datetime as _dt
+    month = max(1, min(12, request.args.get("month", 1, type=int)))
+    bucket_minutes = max(1, request.args.get("bucket_minutes", 60, type=int))
+    bucket_secs = bucket_minutes * 60
+    month_str = f"{month:02d}"
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                strftime('%Y', ts) AS year,
+                CAST(strftime('%s', '2000' || substr(replace(ts,'T',' '), 5)) AS INTEGER) / ? * ? AS bucket,
+                label,
+                ROUND(AVG(temp_f), 1) AS temp_f
+            FROM readings
+            WHERE strftime('%m', ts) = ?
+              AND temp_f IS NOT NULL AND label IS NOT NULL
+            GROUP BY bucket, label, year
+            ORDER BY bucket ASC
+        """, (bucket_secs, bucket_secs, month_str)).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        ts = _dt.datetime.utcfromtimestamp(d["bucket"]).strftime("%Y-%m-%dT%H:%M:%S")
+        result.append({"year": d["year"], "ts": ts, "label": d["label"], "temp_f": d["temp_f"]})
+    return jsonify(result)
 
 
 @app.get("/api/trends")
@@ -703,12 +735,93 @@ _AXIS_UPDATE = """\
   chart.update();"""
 
 
-@app.get("/chart/temperature")
-def chart_temperature():
-    return _chart_page(
-        "Temperature",
-        '<div class="chart-wrap"><h2>Temperature (\u00b0F)</h2><canvas id="chart" height="120"></canvas></div>',
-        """
+_TEMP_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Temperature &mdash; Smart Home</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
+    .nav { margin-bottom: 1.5rem; }
+    .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .chart-wrap { background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); }
+    .chart-wrap h2 { font-size: 0.85rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 1rem; }
+    .btn-group { margin-bottom: 1.2rem; }
+    .btn-group-label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-bottom: .4rem; }
+    .range-btns { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .range-btns button { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
+    .range-btns button:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .range-btns button.active { background: #e07820; color: #fff; border-color: #e07820; }
+  </style>
+</head>
+<body>
+  <h1>Temperature</h1>
+  <div class="nav"><a href="/">&larr; Dashboard</a></div>
+  <div class="btn-group">
+    <div class="btn-group-label">Most Recent</div>
+    <div class="range-btns" id="recent-btns">
+      <button onclick="setRange(0.125)">3h</button>
+      <button onclick="setRange(1)" class="active">24h</button>
+      <button onclick="setRange(3)">3d</button>
+      <button onclick="setRange(7)">7d</button>
+      <button onclick="setRange(30)">30d</button>
+    </div>
+  </div>
+  <div class="btn-group">
+    <div class="btn-group-label">By Month</div>
+    <div class="range-btns" id="month-btns">
+      <button onclick="setMonth(1)">Jan</button>
+      <button onclick="setMonth(2)">Feb</button>
+      <button onclick="setMonth(3)">Mar</button>
+      <button onclick="setMonth(4)">Apr</button>
+      <button onclick="setMonth(5)">May</button>
+      <button onclick="setMonth(6)">Jun</button>
+      <button onclick="setMonth(7)">Jul</button>
+      <button onclick="setMonth(8)">Aug</button>
+      <button onclick="setMonth(9)">Sep</button>
+      <button onclick="setMonth(10)">Oct</button>
+      <button onclick="setMonth(11)">Nov</button>
+      <button onclick="setMonth(12)">Dec</button>
+    </div>
+  </div>
+  <div class="chart-wrap"><h2>Temperature (&deg;F)</h2><canvas id="chart" height="120"></canvas></div>
+<script>
+const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d35400","#8e44ad","#27ae60","#2980b9","#e74c3c","#f39c12"];
+const colorMap = {};
+function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
+let mode = "recent", rangeDays = 1, activeMonth = null;
+
+function localISO(d) {
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+async function loadColors() {
+  const data = await fetch("/api/current").then(r => r.json());
+  data.map(s => s.label).filter(Boolean).sort()
+    .forEach((lbl, i) => { colorMap[lbl] = COLORS[i % COLORS.length]; });
+}
+function setRange(days) {
+  mode = "recent"; rangeDays = days;
+  document.querySelectorAll("#recent-btns button").forEach((b,i) =>
+    b.classList.toggle("active", [0.125,1,3,7,30][i] === days));
+  document.querySelectorAll("#month-btns button").forEach(b => b.classList.remove("active"));
+  loadChart();
+}
+function setMonth(m) {
+  mode = "month"; activeMonth = m;
+  document.querySelectorAll("#recent-btns button").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll("#month-btns button").forEach((b,i) =>
+    b.classList.toggle("active", i + 1 === m));
+  loadChart();
+}
+
 const chart = new Chart(document.getElementById("chart"), {
   type: "line", data: { datasets: [] },
   options: {
@@ -717,22 +830,58 @@ const chart = new Chart(document.getElementById("chart"), {
     plugins: { legend: { labels: { color: "#4a6080" } } },
     scales: {
       x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 8 }, grid: { color: "#e8eef4" } },
-      y: { ticks: { color: "#7a90a8", callback: v => v + "\u00b0F" }, grid: { color: "#e8eef4" } }
+      y: { ticks: { color: "#7a90a8", callback: v => v + "\\u00b0F" }, grid: { color: "#e8eef4" } }
     }
   }
 });
+
 async function loadChart() {
-""" + _HISTORY_FETCH + """
-  const byLabel = {};
-  for (const row of data) (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.temp_f });
-  for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
-  chart.data.datasets = Object.keys(byLabel).sort().map(lbl => ({
-    label: lbl, data: byLabel[lbl], borderColor: labelColor(lbl),
-    backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0,
-  }));
-""" + _AXIS_UPDATE + """
-}""",
-    )
+  if (mode === "recent") {
+    const start = localISO(new Date(Date.now() - rangeDays * 86400000));
+    const bucket = ({0.125:1,1:2,3:10,7:20,30:60})[rangeDays] || 1;
+    const data = await fetch(`/api/history?start=${start}&limit=8000&bucket_minutes=${bucket}`).then(r => r.json());
+    const xMin = new Date(Date.now() - rangeDays * 86400000), xMax = new Date();
+    const timeUnit = rangeDays >= 3 ? "day" : "hour";
+    const byLabel = {};
+    for (const row of data) (byLabel[row.label] ??= []).push({ x: new Date(row.ts), y: row.temp_f });
+    for (const pts of Object.values(byLabel)) pts.sort((a,b) => a.x - b.x);
+    chart.data.datasets = Object.keys(byLabel).sort().map(lbl => ({
+      label: lbl, data: byLabel[lbl], borderColor: labelColor(lbl),
+      backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0,
+    }));
+    chart.options.scales.x.min = xMin;
+    chart.options.scales.x.max = xMax;
+    chart.options.scales.x.time.unit = timeUnit;
+  } else {
+    const data = await fetch(`/api/history/month?month=${activeMonth}&bucket_minutes=60`).then(r => r.json());
+    const byKey = {};
+    for (const row of data) {
+      const key = `${row.label} ${row.year}`;
+      (byKey[key] ??= []).push({ x: new Date(row.ts), y: row.temp_f });
+    }
+    const keys = Object.keys(byKey).sort();
+    chart.data.datasets = keys.map((key, i) => ({
+      label: key, data: byKey[key], borderColor: COLORS[i % COLORS.length],
+      backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0,
+    }));
+    const xMin = new Date(2000, activeMonth - 1, 1);
+    const xMax = new Date(2000, activeMonth, 0, 23, 59, 59);
+    chart.options.scales.x.min = xMin;
+    chart.options.scales.x.max = xMax;
+    chart.options.scales.x.time.unit = "day";
+  }
+  chart.update();
+}
+loadColors().then(loadChart);
+setInterval(() => loadColors().then(loadChart), 30000);
+</script>
+</body>
+</html>"""
+
+
+@app.get("/chart/temperature")
+def chart_temperature():
+    return Response(_TEMP_PAGE, mimetype="text/html")
 
 
 @app.get("/chart/humidity")

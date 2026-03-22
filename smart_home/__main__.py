@@ -568,6 +568,27 @@ def monitor(duration, verbose, db, no_db):
     if presence_devices:
         click.echo(f"Tracking presence for {len(presence_devices)} device(s).")
 
+    # Load all-time per-label records from DB: {label: {"high": float, "low": float}}
+    records: dict[str, dict] = {}
+    if conn:
+        rows = conn.execute(
+            "SELECT label, MAX(temp_f), MIN(temp_f) FROM readings WHERE temp_f IS NOT NULL AND label IS NOT NULL GROUP BY label"
+        ).fetchall()
+        for label, hi, lo in rows:
+            records[label] = {"high": hi, "low": lo}
+
+    async def _notify_record(kind: str, label: str, temp: float) -> None:
+        now = datetime.datetime.now()
+        if kind == "low" and now.hour < 8:
+            # Sleep until 8 AM today
+            target = now.replace(hour=8, minute=0, second=0, microsecond=0)
+            delay = (target - now).total_seconds()
+            await asyncio.sleep(delay)
+        _push.send_notification(
+            title=f"New record {kind}: {label}",
+            body=f"{label} hit a new all-time record {kind} of {temp:.1f}°F",
+        )
+
     async def check_missing_sensors():
         while True:
             await asyncio.sleep(300)  # check every 5 minutes
@@ -604,6 +625,31 @@ def monitor(duration, verbose, db, no_db):
                 last_temp[reading.address] = reading.temp_f
                 last_hum[reading.address]  = reading.humidity
                 last_write[reading.address] = now
+
+        # Check for all-time temperature records
+        label = reading.label
+        if label and reading.temp_f is not None:
+            if label not in records:
+                # First time seeing this label — initialize without notifying
+                records[label] = {"high": reading.temp_f, "low": reading.temp_f}
+            else:
+                rec = records[label]
+                if reading.temp_f > rec["high"]:
+                    rec["high"] = reading.temp_f
+                    click.echo(f"[{ts}] Record high for {label}: {reading.temp_f:.1f}°F")
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(_notify_record("high", label, reading.temp_f))
+                    except RuntimeError:
+                        pass
+                elif reading.temp_f < rec["low"]:
+                    rec["low"] = reading.temp_f
+                    click.echo(f"[{ts}] Record low for {label}: {reading.temp_f:.1f}°F")
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(_notify_record("low", label, reading.temp_f))
+                    except RuntimeError:
+                        pass
 
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
