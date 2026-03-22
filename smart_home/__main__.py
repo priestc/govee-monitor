@@ -574,7 +574,7 @@ def monitor(duration, verbose, db, no_db):
                 click.echo(f"[presence] {matched_name!r} seen (by addr={device.address})")
             return
 
-        if is_xiaomi_lywsd03mmc(device, adv):
+        if is_xiaomi_lywsd03mmc(device, adv) and device.address in label_map:
             is_new = device.address not in xiaomi_devices
             xiaomi_devices[device.address] = (device, ble_name or "LYWSD03MMC")
             if is_new:
