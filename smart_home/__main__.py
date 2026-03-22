@@ -59,6 +59,52 @@ def label_sensors(timeout):
         click.echo("\nLabels saved.")
 
 
+@main.command("unlabel")
+@click.argument("sensor")
+@click.option("--purge", is_flag=True, help="Also delete all DB readings for this sensor.")
+@click.option("--db", default=DEFAULT_DB, show_default=True, help="SQLite database path.")
+def unlabel(sensor, purge, db):
+    """Remove a sensor by label name or MAC address.
+
+    SENSOR can be a label (e.g. 'Outside') or a MAC address.
+    """
+    label_map = _labels.load()
+
+    # Find the entry — match by address or label (case-insensitive)
+    sensor_lower = sensor.lower()
+    match_addr = next(
+        (addr for addr, lbl in label_map.items()
+         if addr.lower() == sensor_lower or lbl.lower() == sensor_lower),
+        None,
+    )
+
+    if match_addr is None:
+        click.echo(f"No sensor found matching {sensor!r}.")
+        click.echo("Current labels:")
+        for addr, lbl in label_map.items():
+            click.echo(f"  {lbl}  ({addr})")
+        return
+
+    label_name = label_map[match_addr]
+    click.echo(f"Removing sensor: {label_name} ({match_addr})")
+
+    del label_map[match_addr]
+    _labels.save(label_map)
+    click.echo("Removed from labels.")
+
+    if purge:
+        conn = open_db(db)
+        deleted = conn.execute(
+            "DELETE FROM readings WHERE address = ? OR label = ?",
+            (match_addr, label_name),
+        ).rowcount
+        conn.commit()
+        conn.close()
+        click.echo(f"Purged {deleted} readings from database.")
+    else:
+        click.echo("Tip: pass --purge to also delete its readings from the database.")
+
+
 DEVICE_TYPES = {
     "1": ("Govee H5074",         ("Govee_H5074", "GVH5074")),
     "2": ("Xiaomi LYWSD03MMC",   ("LYWSD03MMC", "ATC_")),
