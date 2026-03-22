@@ -690,12 +690,12 @@ def monitor(duration, verbose, db, no_db):
                     click.echo(f"[{ts}] Xiaomi connect failed: {name} ({addr})")
 
     def on_reading(reading):
-        reading.label = label_map.get(reading.address)
+        reading.label = label_map.get(reading.address) or reading.name or reading.address
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         click.echo(f"[{ts}] {reading}")
         seen.add(reading.address)
         last_seen[reading.address] = datetime.datetime.now()
-        if conn and reading.label:
+        if conn:
             now = datetime.datetime.now()
             temp_changed = reading.temp_f != last_temp.get(reading.address)
             hum_changed  = reading.humidity != last_hum.get(reading.address)
