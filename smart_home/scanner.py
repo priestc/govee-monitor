@@ -25,6 +25,8 @@ async def read_lywsd03mmc(device, name: str) -> tuple[Reading | None, str | None
             break  # success
         except Exception as e:
             last_err = str(e) or type(e).__name__
+            if "not found" in last_err:
+                break  # device evicted from BlueZ cache — no point retrying
     else:
         return None, last_err
     if len(data) < 3:

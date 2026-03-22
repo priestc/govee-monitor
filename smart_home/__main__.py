@@ -584,7 +584,7 @@ def monitor(duration, verbose, db, no_db):
                 # Poll immediately while the device is fresh in BlueZ's cache.
                 # Delay slightly so the scanner has time to fully register the device.
                 try:
-                    asyncio.get_running_loop().create_task(_poll_xiaomi(device.address, delay=3.0))
+                    asyncio.get_running_loop().create_task(_poll_xiaomi(device.address, delay=1.0))
                 except RuntimeError:
                     pass
 
