@@ -12,24 +12,13 @@ _LYWSD03MMC_CHAR = "EBE0CCC1-7A0A-4B0C-8A1A-6FF2997DA3A6"
 async def read_lywsd03mmc(device, name: str) -> tuple[Reading | None, str | None]:
     """Actively connect to a LYWSD03MMC and read temperature/humidity via GATT.
     Returns (Reading, None) on success or (None, error_message) on failure.
-    device should be a BLEDevice object (more reliable than address string on Linux/BlueZ).
-    Retries up to 3 times with a short delay; br-connection-canceled is often transient.
+    Single attempt — callers should retry by scheduling on the next advertisement.
     """
-    data = None
-    last_err = None
-    for attempt in range(3):
-        if attempt > 0:
-            await asyncio.sleep(4)
-        try:
-            async with BleakClient(device, timeout=10.0) as client:
-                data = await client.read_gatt_char(_LYWSD03MMC_CHAR)
-            break  # success
-        except Exception as e:
-            last_err = str(e) or type(e).__name__
-            if "not found" in last_err:
-                break  # device evicted from BlueZ cache — no point retrying
-    if data is None:
-        return None, last_err
+    try:
+        async with BleakClient(device, timeout=10.0) as client:
+            data = await client.read_gatt_char(_LYWSD03MMC_CHAR)
+    except Exception as e:
+        return None, str(e) or type(e).__name__
     if len(data) < 3:
         return None, f"data too short ({len(data)} bytes)"
     temp_c   = int.from_bytes(data[0:2], "little", signed=True) / 100.0

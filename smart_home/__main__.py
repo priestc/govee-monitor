@@ -543,10 +543,14 @@ def monitor(duration, verbose, db, no_db):
     HEARTBEAT = datetime.timedelta(minutes=30)
     MISSING_THRESHOLD = datetime.timedelta(minutes=10)
 
-    # Xiaomi devices discovered via passive scan — polled actively for readings
-    # Stores BLEDevice object (not just address) so BleakClient connects reliably on Linux
+    # Xiaomi devices — polled actively via GATT on each advertisement (with cooldown).
+    # Key insight: BlueZ evicts devices from its cache shortly after their last advertisement.
+    # We must connect as soon as the device is seen, not on a fixed timer.
     xiaomi_devices: dict[str, tuple] = {}  # address -> (BLEDevice, name, last_rssi)
-    scanner_ref: list = []  # holds the BleakScanner so polling can pause/resume it
+    _poll_active: set[str] = set()         # addresses currently being polled (one at a time per device)
+    _last_poll_ok: dict[str, datetime.datetime] = {}  # address -> last successful poll time
+    POLL_COOLDOWN = datetime.timedelta(seconds=30)
+    scanner_ref: list = []
 
     # presence tracking
     presence_devices = _presence.load_devices()
@@ -581,12 +585,16 @@ def monitor(duration, verbose, db, no_db):
             if is_new:
                 label = label_map.get(device.address) or ble_name or device.address
                 click.echo(f"[{now.strftime('%H:%M:%S')}] Discovered Xiaomi sensor: {label} ({device.address})")
-                # Poll immediately while the device is fresh in BlueZ's cache.
-                # Delay slightly so the scanner has time to fully register the device.
+            # Trigger a poll on every advertisement if not already polling this device
+            # and the cooldown has passed. Device is guaranteed fresh in BlueZ cache right now.
+            addr = device.address
+            last_ok = _last_poll_ok.get(addr, datetime.datetime.min)
+            if addr not in _poll_active and (now - last_ok) >= POLL_COOLDOWN:
+                _poll_active.add(addr)
                 try:
-                    asyncio.get_running_loop().create_task(_poll_xiaomi(device.address, delay=1.0))
+                    asyncio.get_running_loop().create_task(_poll_xiaomi(addr))
                 except RuntimeError:
-                    pass
+                    _poll_active.discard(addr)
 
         if verbose and ble_name:
             click.echo(f"[presence] untracked: {ble_name!r} ({device.address})")
@@ -688,42 +696,37 @@ def monitor(duration, verbose, db, no_db):
 
     _poll_lock = asyncio.Lock()
 
-    async def _poll_xiaomi(addr: str, delay: float = 0.0) -> None:
-        """Poll one Xiaomi sensor. Uses a lock to prevent concurrent GATT connections.
-        On 'not found' removes the device so it will be re-polled on next discovery.
+    async def _poll_xiaomi(addr: str) -> None:
+        """Poll one Xiaomi sensor immediately after it has been seen advertising.
+        Uses _poll_active to ensure only one poll per device runs at a time.
+        Uses _poll_lock to prevent concurrent GATT connections across devices.
         """
-        if delay:
-            await asyncio.sleep(delay)
-        entry = xiaomi_devices.get(addr)
-        if entry is None:
-            return
-        ble_device, name, last_rssi = entry
-        label = label_map.get(addr) or name
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
-        click.echo(f"[{ts}] Polling {label} ({addr})...")
-        async with _poll_lock:
-            reading, err = await read_lywsd03mmc(ble_device, name)
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
-        if reading is not None:
-            # Refresh rssi from xiaomi_devices in case it was updated while polling
-            _, _, last_rssi = xiaomi_devices.get(addr, (None, None, last_rssi))
-            reading.rssi = last_rssi
-            click.echo(f"[{ts}] Poll OK: {label} temp={reading.temp_f:.1f}°F humidity={reading.humidity:.1f}%")
-            on_reading(reading)
-        else:
-            click.echo(f"[{ts}] Poll FAILED: {label} ({addr}): {err}")
-            if err and "not found" in err:
-                # BlueZ dropped the device from its cache; remove so next advertisement
-                # triggers a fresh immediate poll instead of perpetually failing.
-                xiaomi_devices.pop(addr, None)
-                click.echo(f"[{ts}] Removed {label} from poll list — will re-add on next advertisement")
-
-    async def check_xiaomi_sensors():
-        """Periodic fallback poll for sensors that haven't been re-discovered recently."""
-        while True:
-            await asyncio.sleep(60)
-            for addr in list(xiaomi_devices):
-                await _poll_xiaomi(addr)
+        try:
+            # Brief delay to let BlueZ fully register the device before connecting
+            await asyncio.sleep(0.5)
+            entry = xiaomi_devices.get(addr)
+            if entry is None:
+                return
+            ble_device, name, last_rssi = entry
+            label = label_map.get(addr) or name
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            click.echo(f"[{ts}] Polling {label} ({addr})...")
+            async with _poll_lock:
+                reading, err = await read_lywsd03mmc(ble_device, name)
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            if reading is not None:
+                _last_poll_ok[addr] = datetime.datetime.now()
+                _, _, last_rssi = xiaomi_devices.get(addr, (None, None, last_rssi))
+                reading.rssi = last_rssi
+                click.echo(f"[{ts}] Poll OK: {label} temp={reading.temp_f:.1f}°F humidity={reading.humidity:.1f}%")
+                on_reading(reading)
+            else:
+                click.echo(f"[{ts}] Poll FAILED: {label} ({addr}): {err}")
+                if err and "not found" in err:
+                    # BlueZ evicted the device; remove so next advertisement triggers a fresh poll
+                    xiaomi_devices.pop(addr, None)
+        finally:
+            _poll_active.discard(addr)
 
     def on_reading(reading):
         db_label = label_map.get(reading.address)
@@ -770,7 +773,7 @@ def monitor(duration, verbose, db, no_db):
 
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
-        extra = [check_missing_sensors(), check_xiaomi_sensors()]
+        extra = [check_missing_sensors()]
         if presence_devices:
             extra.append(check_presence())
         asyncio.run(scan(
