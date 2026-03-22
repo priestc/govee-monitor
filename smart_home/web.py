@@ -788,11 +788,22 @@ _TEMP_PAGE = """\
     .range-btns button { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
     .range-btns button:hover { background: #f0f4f8; border-color: #aabbc8; }
     .range-btns button.active { background: #e07820; color: #fff; border-color: #e07820; }
+    .res-row { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.2rem; }
+    .res-row label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+    .res-row select { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .3rem .7rem; font-size: .85rem; font-weight: 500; cursor: pointer; }
   </style>
 </head>
 <body>
   <h1>Temperature</h1>
   <div class="nav"><a href="/">&larr; Dashboard</a></div>
+  <div class="res-row">
+    <label for="res">Resolution</label>
+    <select id="res" onchange="resolution=this.value; loadChart()">
+      <option value="low" selected>Low</option>
+      <option value="medium">Medium</option>
+      <option value="max">Max</option>
+    </select>
+  </div>
   <div class="btn-group">
     <div class="range-btns" id="sensor-btns">
       <button onclick="toggleSensor('Inside', this)" class="active">Inside</button>
@@ -834,6 +845,20 @@ const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d3
 const colorMap = {};
 function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
 let mode = "recent", rangeDays = 1, activeMonth = null;
+let resolution = "low";
+const BUCKETS = {
+  recent: {
+    low:    {0.125:10, 1:30,  3:60,  7:120, 30:360},
+    medium: {0.125:3,  1:10,  3:20,  7:30,  30:60 },
+    max:    {0.125:1,  1:2,   3:5,   7:10,  30:20 },
+  },
+  month:  { low: 240, medium: 60, max: 10 },
+  year:   { low: 1440, medium: 360, max: 60 },
+};
+function getBucket() {
+  if (mode === "recent") return BUCKETS.recent[resolution][rangeDays] || 60;
+  return BUCKETS[mode][resolution];
+}
 const hiddenLabels = new Set();
 let showDifferential = false;
 function toggleSensor(name, btn) {
@@ -952,8 +977,7 @@ const chart = new Chart(document.getElementById("chart"), {
 async function loadChart() {
   if (mode === "recent") {
     const start = localISO(new Date(Date.now() - rangeDays * 86400000));
-    const bucket = ({0.125:1,1:2,3:10,7:20,30:60})[rangeDays] || 1;
-    const data = await fetch(`/api/history?start=${start}&limit=8000&bucket_minutes=${bucket}`).then(r => r.json());
+    const data = await fetch(`/api/history?start=${start}&limit=8000&bucket_minutes=${getBucket()}`).then(r => r.json());
     const xMin = new Date(Date.now() - rangeDays * 86400000), xMax = new Date();
     const timeUnit = rangeDays >= 3 ? "day" : "hour";
     const byLabel = {};
@@ -968,7 +992,7 @@ async function loadChart() {
     chart.options.scales.x.time.unit = timeUnit;
     addDiffDatasets(data, false);
   } else if (mode === "month") {
-    const data = await fetch(`/api/history/month?month=${activeMonth}&bucket_minutes=60`).then(r => r.json());
+    const data = await fetch(`/api/history/month?month=${activeMonth}&bucket_minutes=${getBucket()}`).then(r => r.json());
     const byKey = {};
     for (const row of data) {
       const key = `${row.label} ${row.year}`;
@@ -986,7 +1010,7 @@ async function loadChart() {
     chart.options.scales.x.time.unit = "day";
     addDiffDatasets(data, true);
   } else {
-    const data = await fetch(`/api/history/year?bucket_minutes=360`).then(r => r.json());
+    const data = await fetch(`/api/history/year?bucket_minutes=${getBucket()}`).then(r => r.json());
     const byKey = {};
     for (const row of data) {
       const key = `${row.label} ${row.year}`;
