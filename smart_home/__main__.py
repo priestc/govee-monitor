@@ -695,7 +695,7 @@ def monitor(duration, verbose, db, no_db):
         click.echo(f"[{ts}] {reading}")
         seen.add(reading.address)
         last_seen[reading.address] = datetime.datetime.now()
-        if conn:
+        if conn and reading.label:
             now = datetime.datetime.now()
             temp_changed = reading.temp_f != last_temp.get(reading.address)
             hum_changed  = reading.humidity != last_hum.get(reading.address)
