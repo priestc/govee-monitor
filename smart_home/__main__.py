@@ -544,7 +544,8 @@ def monitor(duration, verbose, db, no_db):
     MISSING_THRESHOLD = datetime.timedelta(minutes=10)
 
     # Xiaomi devices discovered via passive scan — polled actively for readings
-    xiaomi_devices: dict[str, str] = {}  # address -> BLE name
+    # Stores BLEDevice object (not just address) so BleakClient connects reliably on Linux
+    xiaomi_devices: dict[str, tuple] = {}  # address -> (BLEDevice, name)
 
     # presence tracking
     presence_devices = _presence.load_devices()
@@ -573,9 +574,11 @@ def monitor(duration, verbose, db, no_db):
                 click.echo(f"[presence] {matched_name!r} seen (by addr={device.address})")
             return
 
-        if is_xiaomi_lywsd03mmc(device, adv) and device.address not in xiaomi_devices:
-            xiaomi_devices[device.address] = ble_name or "LYWSD03MMC"
-            click.echo(f"[{now.strftime('%H:%M:%S')}] Discovered Xiaomi sensor: {ble_name!r} ({device.address})")
+        if is_xiaomi_lywsd03mmc(device, adv):
+            is_new = device.address not in xiaomi_devices
+            xiaomi_devices[device.address] = (device, ble_name or "LYWSD03MMC")
+            if is_new:
+                click.echo(f"[{now.strftime('%H:%M:%S')}] Discovered Xiaomi sensor: {ble_name!r} ({device.address})")
 
         if verbose and ble_name:
             click.echo(f"[presence] untracked: {ble_name!r} ({device.address})")
@@ -678,8 +681,8 @@ def monitor(duration, verbose, db, no_db):
     async def check_xiaomi_sensors():
         while True:
             await asyncio.sleep(30)
-            for addr, name in list(xiaomi_devices.items()):
-                reading = await read_lywsd03mmc(addr, name)
+            for addr, (ble_device, name) in list(xiaomi_devices.items()):
+                reading = await read_lywsd03mmc(ble_device, name)
                 if reading is not None:
                     on_reading(reading)
                 elif verbose:
