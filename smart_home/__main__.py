@@ -682,12 +682,16 @@ def monitor(duration, verbose, db, no_db):
         while True:
             await asyncio.sleep(30)
             for addr, (ble_device, name) in list(xiaomi_devices.items()):
+                label = label_map.get(addr) or name
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                click.echo(f"[{ts}] Polling {label} ({addr})...")
                 reading = await read_lywsd03mmc(ble_device, name)
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
                 if reading is not None:
+                    click.echo(f"[{ts}] Poll OK: {label} temp={reading.temp_f:.1f}°F humidity={reading.humidity:.1f}%")
                     on_reading(reading)
-                elif verbose:
-                    ts = datetime.datetime.now().strftime("%H:%M:%S")
-                    click.echo(f"[{ts}] Xiaomi connect failed: {name} ({addr})")
+                else:
+                    click.echo(f"[{ts}] Poll FAILED: {label} ({addr})")
 
     def on_reading(reading):
         db_label = label_map.get(reading.address)
