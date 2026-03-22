@@ -15,6 +15,7 @@ async def read_lywsd03mmc(device, name: str) -> tuple[Reading | None, str | None
     device should be a BLEDevice object (more reliable than address string on Linux/BlueZ).
     Retries up to 3 times with a short delay; br-connection-canceled is often transient.
     """
+    data = None
     last_err = None
     for attempt in range(3):
         if attempt > 0:
@@ -27,7 +28,7 @@ async def read_lywsd03mmc(device, name: str) -> tuple[Reading | None, str | None
             last_err = str(e) or type(e).__name__
             if "not found" in last_err:
                 break  # device evicted from BlueZ cache — no point retrying
-    else:
+    if data is None:
         return None, last_err
     if len(data) < 3:
         return None, f"data too short ({len(data)} bytes)"
