@@ -120,12 +120,29 @@ async def scan(
                     callback(reading)
 
     async def _run():
-        # passive scanning mode: listen for advertisements without sending scan
-        # requests, which avoids interfering with GATT connection attempts.
-        scanner = BleakScanner(
-            detection_callback=detection_callback,
-            scanning_mode="passive",
-        )
+        # Passive scanning mode avoids sending scan request packets, which on
+        # BlueZ/Linux interfere with GATT connection attempts (br-connection-canceled).
+        # BlueZ requires or_patterns to filter which advertisements to deliver.
+        try:
+            from bleak.backends.bluezdbus.advertisement_monitor import OrPattern
+            from bleak.backends.bluezdbus.scanner import BlueZScannerArgs
+            scanner = BleakScanner(
+                detection_callback=detection_callback,
+                scanning_mode="passive",
+                bluez=BlueZScannerArgs(or_patterns=[
+                    # Govee H5074: manufacturer data company ID 0xEC88 (little-endian)
+                    OrPattern(0, 0xFF, bytes([0x88, 0xEC])),
+                    # Xiaomi LYWSD03MMC: 16-bit service UUID 0xFE95 (little-endian)
+                    OrPattern(0, 0x16, bytes([0x95, 0xFE])),
+                    # Broad match for presence/other devices: common BLE flags values
+                    OrPattern(0, 0x01, b"\x06"),  # LE General Discoverable + BR/EDR Not Supported
+                    OrPattern(0, 0x01, b"\x1a"),  # LE Limited Discoverable
+                    OrPattern(0, 0x01, b"\x02"),  # LE Limited Discoverable (old)
+                ]),
+            )
+        except (ImportError, Exception):
+            # Non-Linux or older bleak: fall back to active scanning
+            scanner = BleakScanner(detection_callback=detection_callback)
         if scanner_ref is not None:
             scanner_ref.append(scanner)
         async with scanner:
