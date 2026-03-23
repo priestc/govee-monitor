@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import click
 from bleak import BleakScanner
-from smart_home.scanner import scan, is_xiaomi_lywsd03mmc, read_lywsd03mmc
+from smart_home.scanner import scan, is_xiaomi_lywsd03mmc, is_pvvx_lywsd03mmc, read_lywsd03mmc
 from smart_home import labels as _labels
 from smart_home import presence as _presence
 from smart_home import push as _push
@@ -581,7 +581,7 @@ def monitor(duration, verbose, db, no_db):
                 click.echo(f"[presence] {matched_name!r} seen (by addr={device.address})")
             return
 
-        if is_xiaomi_lywsd03mmc(device, adv) and device.address in label_map:
+        if is_xiaomi_lywsd03mmc(device, adv) and not is_pvvx_lywsd03mmc(device, adv) and device.address in label_map:
             is_new = device.address not in xiaomi_devices
             xiaomi_devices[device.address] = (device, ble_name or "LYWSD03MMC", adv.rssi)
             if is_new:

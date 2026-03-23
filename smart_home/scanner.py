@@ -46,10 +46,13 @@ async def read_lywsd03mmc(device, name: str) -> tuple[Reading | None, str | None
 
 def is_pvvx_lywsd03mmc(device: BLEDevice, adv: AdvertisementData) -> bool:
     """True for LYWSD03MMC sensors running PVVX/ATC custom firmware.
-    They advertise with name ATC_XXXXXX and service UUID 0x181A.
+    Detects by ATC_ name prefix OR by presence of service data UUID 0x181A,
+    so it works even when BlueZ has the old LYWSD03MMC name cached.
     """
     name = device.name or adv.local_name or ""
-    return name.startswith("ATC_")
+    if name.startswith("ATC_"):
+        return True
+    return PVVX_SERVICE_UUID in (adv.service_data or {})
 
 
 def is_govee_h5074(device: BLEDevice, adv: AdvertisementData) -> bool:
