@@ -9,9 +9,8 @@ Protocol (from TelinkMiFlasher.html, pvvx/ATC_MiThermometer):
   OAD service:    00010203-0405-0607-0809-0a0b0c0d1912
   OAD write char: 00010203-0405-0607-0809-0a0b0c0d2b12
   Packet format:  [0x01][block_lo][block_hi][16 bytes firmware]  (19 bytes)
-  Flow control:   if char supports notify, device ACKs each block with
-                  [next_block_lo][next_block_hi]; otherwise write-with-
-                  response provides GATT-layer flow control.
+  Flow control:   write-with-response if char supports it (GATT-level ACK);
+                  otherwise write-without-response with ~12 ms inter-packet delay.
 """
 from __future__ import annotations
 import asyncio
@@ -98,19 +97,10 @@ async def flash_firmware(
                 "a LYWSD03MMC running stock or PVVX firmware."
             )
 
-        # Enable notifications if the characteristic supports them.
-        # The device ACKs each block by notifying the next expected block index.
-        has_notify = "notify" in oad_char.properties or "indicate" in oad_char.properties
-        _next_block: list[int] = [0]
-        _ack_event = asyncio.Event()
-
-        def _on_notify(_sender, data: bytearray) -> None:
-            if len(data) >= 2:
-                _next_block[0] = int.from_bytes(data[:2], "little")
-                _ack_event.set()
-
-        if has_notify:
-            await client.start_notify(OAD_CHAR, _on_notify)
+        # Prefer write-with-response: GATT provides natural per-packet flow
+        # control (device only ACKs when ready for next block).  Fall back to
+        # write-without-response with a fixed inter-packet delay.
+        use_response = "write" in oad_char.properties
 
         block_num = 0
         while block_num < total_blocks:
@@ -124,43 +114,23 @@ async def flash_firmware(
                 + block_data
             )
 
-            if has_notify:
-                _ack_event.clear()
-
             try:
-                # Use write-with-response when no notify (provides GATT-layer flow ctrl).
-                await client.write_gatt_char(
-                    OAD_CHAR, packet, response=not has_notify
-                )
+                await client.write_gatt_char(OAD_CHAR, packet, response=use_response)
             except Exception as e:
                 err = str(e).lower()
                 if is_last and any(
                     k in err for k in ("disconnect", "closed", "not connected", "broken pipe")
                 ):
-                    # Device rebooted immediately after last block — normal end
+                    # Device rebooted immediately after receiving the last block — expected
                     block_num += 1
                     break
                 raise RuntimeError(f"write failed at block {block_num}: {e}") from e
 
-            if has_notify and not is_last:
-                try:
-                    await asyncio.wait_for(_ack_event.wait(), timeout=10.0)
-                    block_num = _next_block[0]
-                except asyncio.TimeoutError:
-                    raise RuntimeError(
-                        f"timeout waiting for ACK at block {block_num}/{total_blocks}"
-                    )
-            else:
-                if not has_notify:
-                    # ~12 ms for device to write one 16-byte block to flash
-                    await asyncio.sleep(0.012)
-                block_num += 1
+            if not use_response:
+                # ~12 ms per block gives ~80 blocks/s — fast enough and lets
+                # the device keep up with flash writes.
+                await asyncio.sleep(0.012)
 
+            block_num += 1
             if progress:
                 progress(block_num, total_blocks)
-
-        if has_notify:
-            try:
-                await client.stop_notify(OAD_CHAR)
-            except Exception:
-                pass
