@@ -205,7 +205,9 @@ def sensor_history(label, limit, db):
     click.echo(f"  {'timestamp':<22} {'label':<20} {'temp (°F)':<12} {'humidity'}")
     click.echo("  " + "-" * 62)
     for ts, lbl, temp_f, humidity in rows:
-        click.echo(f"  {ts:<22} {(lbl or ''):<20} {temp_f:<12.1f} {humidity:.1f}%")
+        temp_str = f"{temp_f:.1f}" if temp_f is not None else "—"
+        hum_str  = f"{humidity:.1f}%" if humidity is not None else "—"
+        click.echo(f"  {ts:<22} {(lbl or ''):<20} {temp_str:<12} {hum_str}")
 
 
 @main.command("add-device")
