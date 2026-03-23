@@ -97,10 +97,14 @@ async def flash_firmware(
                 "a LYWSD03MMC running stock or PVVX firmware."
             )
 
-        # Prefer write-with-response: GATT provides natural per-packet flow
-        # control (device only ACKs when ready for next block).  Fall back to
-        # write-without-response with a fixed inter-packet delay.
-        use_response = "write" in oad_char.properties
+        # Use write-without-response throughout.  The stock LYWSD03MMC firmware
+        # briefly disconnects/reconnects internally during OAD (switching to a
+        # dedicated OTA mode), which invalidates BlueZ's service-discovery state
+        # and causes write-with-response to fail with "Service Discovery has not
+        # been performed yet".  Write-without-response avoids that check.
+        # We pace at ~20 ms per block (50 blocks/s) to let the device keep up
+        # with flash writes; the total transfer takes ~2 minutes for 86 KB.
+        INTER_BLOCK_DELAY = 0.020
 
         block_num = 0
         while block_num < total_blocks:
@@ -115,22 +119,17 @@ async def flash_firmware(
             )
 
             try:
-                await client.write_gatt_char(OAD_CHAR, packet, response=use_response)
+                await client.write_gatt_char(OAD_CHAR, packet, response=False)
             except Exception as e:
                 err = str(e).lower()
-                if is_last and any(
-                    k in err for k in ("disconnect", "closed", "not connected", "broken pipe")
-                ):
-                    # Device rebooted immediately after receiving the last block — expected
-                    block_num += 1
-                    break
+                if any(k in err for k in ("disconnect", "closed", "not connected", "broken pipe")):
+                    if is_last or block_num >= total_blocks - 10:
+                        # Device rebooted at/near end — treat as success
+                        block_num += 1
+                        break
                 raise RuntimeError(f"write failed at block {block_num}: {e}") from e
 
-            if not use_response:
-                # ~12 ms per block gives ~80 blocks/s — fast enough and lets
-                # the device keep up with flash writes.
-                await asyncio.sleep(0.012)
-
+            await asyncio.sleep(INTER_BLOCK_DELAY)
             block_num += 1
             if progress:
                 progress(block_num, total_blocks)
