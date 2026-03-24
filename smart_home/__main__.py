@@ -1085,11 +1085,49 @@ def flash_device(address, firmware_path, timeout):
         click.echo(f"\nFlash failed: {flash_error[0]}")
         return
 
-    # ── 5. Post-flash ─────────────────────────────────────────────────────────
-    _pvvx.mark_address(address)
-
+    # ── 5. Verify firmware installation ──────────────────────────────────────
     atc_name = "ATC_" + address.replace(":", "")[-6:]
     click.echo(f"\nFlash complete! The sensor is rebooting.")
+    click.echo(f"Verifying firmware installation (waiting for {atc_name} advertisement)...")
+
+    verify_timeout = 30.0
+    verified: list[bool] = [False]
+
+    async def _verify_firmware():
+        found_ev = asyncio.Event()
+
+        def _det(device, adv):
+            name = device.name or adv.local_name or ""
+            # Match by expected ATC name, or by MAC address advertising as PVVX
+            if name.upper() == atc_name.upper() or (
+                device.address.upper() == address and name.upper().startswith("ATC_")
+            ):
+                verified[0] = True
+                found_ev.set()
+
+        async with BleakScanner(detection_callback=_det):
+            try:
+                await asyncio.wait_for(found_ev.wait(), timeout=verify_timeout)
+            except asyncio.TimeoutError:
+                pass
+
+    try:
+        asyncio.run(_verify_firmware())
+    except KeyboardInterrupt:
+        click.echo("\nVerification skipped.")
+
+    if verified[0]:
+        click.echo(f"✓ Firmware verified — {atc_name} is advertising successfully.")
+    else:
+        click.echo(
+            f"⚠  Could not detect {atc_name} within {int(verify_timeout)}s.\n"
+            "   The flash may still have succeeded — the sensor sometimes takes\n"
+            "   longer to reboot. You can confirm manually with: smart-home scan"
+        )
+
+    # ── 6. Post-flash ─────────────────────────────────────────────────────────
+    _pvvx.mark_address(address)
+
     click.echo(f"New BLE name: {atc_name}")
     click.echo()
 
