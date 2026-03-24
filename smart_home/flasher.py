@@ -62,6 +62,35 @@ def validate_firmware(data: bytes) -> int:
     return (len(data) + BLOCK_SIZE - 1) // BLOCK_SIZE
 
 
+_DISCONNECT_ERRORS = ("disconnect", "closed", "not connected", "broken pipe")
+_MAX_RETRIES       = 5    # reconnect attempts before giving up
+_RECONNECT_DELAY   = 3.0  # seconds to wait before reconnecting
+_INTER_BLOCK_DELAY = 0.020
+
+
+async def _connect_and_find_oad(address_or_device):
+    """Connect to device and return (BleakClient, oad_char).
+
+    Raises RuntimeError if the OAD characteristic is not found.
+    The returned client is already connected; caller must close it.
+    """
+    client = BleakClient(address_or_device, timeout=20.0)
+    await client.connect()
+
+    for svc in client.services:
+        if svc.uuid.lower() == OAD_SERVICE.lower():
+            for ch in svc.characteristics:
+                if ch.uuid.lower() == OAD_CHAR.lower():
+                    return client, ch
+
+    await client.disconnect()
+    raise RuntimeError(
+        "OAD characteristic not found \u2014 make sure the sensor is in "
+        "connectable mode (power it off and back on) and that it is "
+        "a LYWSD03MMC running stock or PVVX firmware."
+    )
+
+
 async def flash_firmware(
     address_or_device,
     firmware: bytes,
@@ -73,63 +102,84 @@ async def flash_firmware(
     firmware: raw .bin bytes (validated by validate_firmware before calling).
     progress: optional callable(blocks_done: int, total_blocks: int).
 
-    The device must be in connectable mode (freshly power-cycled).
+    Automatically reconnects and resumes if the device drops the connection
+    mid-transfer (common on stock firmware during OAD mode switch).
     Raises RuntimeError on failure.
     """
     total_blocks = validate_firmware(firmware)
     pad = total_blocks * BLOCK_SIZE - len(firmware)
     padded = firmware + b"\xff" * pad
 
-    async with BleakClient(address_or_device, timeout=20.0) as client:
-        # Locate OAD characteristic
-        oad_char = None
-        for svc in client.services:
-            if svc.uuid.lower() == OAD_SERVICE.lower():
-                for ch in svc.characteristics:
-                    if ch.uuid.lower() == OAD_CHAR.lower():
-                        oad_char = ch
-                        break
+    # Resolve address string once so reconnects can use it directly.
+    address = (
+        address_or_device
+        if isinstance(address_or_device, str)
+        else address_or_device.address
+    )
 
-        if oad_char is None:
-            raise RuntimeError(
-                "OAD characteristic not found — make sure the sensor is in "
-                "connectable mode (power it off and back on) and that it is "
-                "a LYWSD03MMC running stock or PVVX firmware."
-            )
+    client, oad_char = await _connect_and_find_oad(address_or_device)
 
-        # Use write-without-response throughout.  The stock LYWSD03MMC firmware
-        # briefly disconnects/reconnects internally during OAD (switching to a
-        # dedicated OTA mode), which invalidates BlueZ's service-discovery state
-        # and causes write-with-response to fail with "Service Discovery has not
-        # been performed yet".  Write-without-response avoids that check.
-        # We pace at ~20 ms per block (50 blocks/s) to let the device keep up
-        # with flash writes; the total transfer takes ~2 minutes for 86 KB.
-        INTER_BLOCK_DELAY = 0.020
+    # Use write-without-response throughout.  The stock LYWSD03MMC firmware
+    # briefly disconnects/reconnects internally during OAD (switching to a
+    # dedicated OTA mode), which invalidates BlueZ's service-discovery state
+    # and causes write-with-response to fail with "Service Discovery has not
+    # been performed yet".  Write-without-response avoids that check.
+    # We pace at ~20 ms per block (50 blocks/s) to let the device keep up
+    # with flash writes; the total transfer takes ~2 minutes for 86 KB.
 
-        block_num = 0
+    block_num = 0
+    retries   = 0
+
+    try:
         while block_num < total_blocks:
             is_last = block_num == total_blocks - 1
-            offset = block_num * BLOCK_SIZE
-            block_data = padded[offset : offset + BLOCK_SIZE]
+            offset  = block_num * BLOCK_SIZE
 
             # OAD packet: command(1) + block_index_LE(2) + data(16) = 19 bytes
             packet = (
                 bytes([0x01, block_num & 0xFF, (block_num >> 8) & 0xFF])
-                + block_data
+                + padded[offset : offset + BLOCK_SIZE]
             )
 
             try:
                 await client.write_gatt_char(OAD_CHAR, packet, response=False)
+
             except Exception as e:
                 err = str(e).lower()
-                if any(k in err for k in ("disconnect", "closed", "not connected", "broken pipe")):
-                    if is_last or block_num >= total_blocks - 10:
-                        # Device rebooted at/near end — treat as success
-                        block_num += 1
-                        break
-                raise RuntimeError(f"write failed at block {block_num}: {e}") from e
+                is_disconnect = any(k in err for k in _DISCONNECT_ERRORS)
 
-            await asyncio.sleep(INTER_BLOCK_DELAY)
+                if is_disconnect and (is_last or block_num >= total_blocks - 10):
+                    # Device rebooted at/near end of transfer \u2014 treat as success.
+                    block_num += 1
+                    break
+
+                if is_disconnect and retries < _MAX_RETRIES:
+                    retries += 1
+                    if progress:
+                        # Emit a sentinel so the caller can show a reconnect message.
+                        progress(block_num, total_blocks, reconnecting=True)
+                    await asyncio.sleep(_RECONNECT_DELAY)
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                    client, oad_char = await _connect_and_find_oad(address)
+                    # Resume from the block that failed \u2014 do not advance block_num.
+                    continue
+
+                raise RuntimeError(
+                    f"write failed at block {block_num} "
+                    f"(retried {retries}x): {e}"
+                ) from e
+
+            await asyncio.sleep(_INTER_BLOCK_DELAY)
             block_num += 1
+            retries = 0  # reset retry counter after each successful write
             if progress:
                 progress(block_num, total_blocks)
+
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass

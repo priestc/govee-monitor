@@ -1059,7 +1059,11 @@ def flash_device(address, firmware_path, timeout):
 
         last_pct: list[int] = [-1]
 
-        def _progress(done: int, total: int) -> None:
+        def _progress(done: int, total: int, reconnecting: bool = False) -> None:
+            if reconnecting:
+                click.echo(f"\n  Connection dropped at block {done}/{total}, reconnecting...")
+                last_pct[0] = -1  # force redraw after reconnect
+                return
             pct = done * 100 // total
             if pct != last_pct[0]:
                 last_pct[0] = pct
