@@ -8,9 +8,9 @@ ATC_XXXXXX where XXXXXX is the last 6 hex digits of the MAC address.
 Protocol (from TelinkMiFlasher.html, pvvx/ATC_MiThermometer):
   OAD service:    00010203-0405-0607-0809-0a0b0c0d1912
   OAD write char: 00010203-0405-0607-0809-0a0b0c0d2b12
-  Packet format:  [0x01][block_lo][block_hi][16 bytes firmware]  (19 bytes)
-  Flow control:   write-with-response if char supports it (GATT-level ACK);
-                  otherwise write-without-response with ~12 ms inter-packet delay.
+  Block packet:   [block_lo][block_hi][16 bytes data][crc_lo][crc_hi]  (20 bytes)
+  End packet:     [0x02][0xff][last_block_lo][last_block_hi][~last_block_lo][~last_block_hi]
+  CRC:            CRC-16/CCITT-FALSE over (block_index_LE + 16 bytes data)
 """
 from __future__ import annotations
 import asyncio
@@ -62,7 +62,45 @@ def validate_firmware(data: bytes) -> int:
     return (len(data) + BLOCK_SIZE - 1) // BLOCK_SIZE
 
 
-_DISCONNECT_ERRORS = ("disconnect", "closed", "not connected", "broken pipe")
+def _crc16(data: bytes) -> int:
+    """CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection)."""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc <<= 1
+            crc &= 0xFFFF
+    return crc
+
+
+def _make_block_packet(block_num: int, block_data: bytes) -> bytes:
+    """Build a 20-byte OAD block packet with CRC.
+
+    Format: [block_lo][block_hi][16 bytes data][crc_lo][crc_hi]
+    CRC covers the block index bytes + data bytes.
+    """
+    index_bytes = bytes([block_num & 0xFF, (block_num >> 8) & 0xFF])
+    crc = _crc16(index_bytes + block_data)
+    return index_bytes + block_data + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+
+
+def _make_end_packet(total_blocks: int) -> bytes:
+    """Build the end-of-image packet that triggers the device to apply firmware.
+
+    Format: [0x02][0xff][last_lo][last_hi][~last_lo][~last_hi]
+    """
+    last = total_blocks - 1
+    return bytes([
+        0x02, 0xFF,
+        last & 0xFF, (last >> 8) & 0xFF,
+        (~last) & 0xFF, (~last >> 8) & 0xFF,
+    ])
+
+
+_DISCONNECT_ERRORS = ("disconnect", "closed", "not connected", "broken pipe", "service discovery")
 _MAX_RETRIES       = 5    # reconnect attempts before giving up
 _RECONNECT_DELAY   = 3.0  # seconds to wait before reconnecting
 _INTER_BLOCK_DELAY = 0.020
@@ -102,7 +140,7 @@ async def flash_firmware(
     firmware: raw .bin bytes (validated by validate_firmware before calling).
     progress: optional callable(blocks_done: int, total_blocks: int).
 
-    Automatically reconnects and resumes if the device drops the connection
+    Automatically reconnects and restarts if the device drops the connection
     mid-transfer (common on stock firmware during OAD mode switch).
     Raises RuntimeError on failure.
     """
@@ -119,27 +157,14 @@ async def flash_firmware(
 
     client, oad_char = await _connect_and_find_oad(address_or_device)
 
-    # Use write-without-response throughout.  The stock LYWSD03MMC firmware
-    # briefly disconnects/reconnects internally during OAD (switching to a
-    # dedicated OTA mode), which invalidates BlueZ's service-discovery state
-    # and causes write-with-response to fail with "Service Discovery has not
-    # been performed yet".  Write-without-response avoids that check.
-    # We pace at ~20 ms per block (50 blocks/s) to let the device keep up
-    # with flash writes; the total transfer takes ~2 minutes for 86 KB.
-
     block_num = 0
     retries   = 0
 
     try:
         while block_num < total_blocks:
-            is_last = block_num == total_blocks - 1
-            offset  = block_num * BLOCK_SIZE
-
-            # OAD packet: command(1) + block_index_LE(2) + data(16) = 19 bytes
-            packet = (
-                bytes([0x01, block_num & 0xFF, (block_num >> 8) & 0xFF])
-                + padded[offset : offset + BLOCK_SIZE]
-            )
+            offset     = block_num * BLOCK_SIZE
+            block_data = padded[offset : offset + BLOCK_SIZE]
+            packet     = _make_block_packet(block_num, block_data)
 
             try:
                 await client.write_gatt_char(OAD_CHAR, packet, response=False)
@@ -148,15 +173,9 @@ async def flash_firmware(
                 err = str(e).lower()
                 is_disconnect = any(k in err for k in _DISCONNECT_ERRORS)
 
-                if is_disconnect and (is_last or block_num >= total_blocks - 10):
-                    # Device rebooted at/near end of transfer \u2014 treat as success.
-                    block_num += 1
-                    break
-
                 if is_disconnect and retries < _MAX_RETRIES:
                     retries += 1
                     if progress:
-                        # Emit a sentinel so the caller can show a reconnect message.
                         progress(block_num, total_blocks, reconnecting=True)
                     await asyncio.sleep(_RECONNECT_DELAY)
                     try:
@@ -164,7 +183,8 @@ async def flash_firmware(
                     except Exception:
                         pass
                     client, oad_char = await _connect_and_find_oad(address)
-                    # Resume from the block that failed \u2014 do not advance block_num.
+                    # Telink OAD resets on disconnect \u2014 restart from block 0.
+                    block_num = 0
                     continue
 
                 raise RuntimeError(
@@ -177,6 +197,15 @@ async def flash_firmware(
             retries = 0  # reset retry counter after each successful write
             if progress:
                 progress(block_num, total_blocks)
+
+        # Send end-of-image packet to trigger the device to apply firmware.
+        end_packet = _make_end_packet(total_blocks)
+        try:
+            await client.write_gatt_char(OAD_CHAR, end_packet, response=False)
+        except Exception:
+            # Device may disconnect immediately upon receiving the end packet
+            # as it reboots into the new firmware \u2014 that's expected.
+            pass
 
     finally:
         try:
