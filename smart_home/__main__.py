@@ -1061,7 +1061,7 @@ def flash_device(address, firmware_path, timeout):
 
         def _progress(done: int, total: int, reconnecting: bool = False) -> None:
             if reconnecting:
-                click.echo(f"\n  Connection dropped at block {done}/{total}, reconnecting...")
+                click.echo(f"\n  Connection dropped at block {done}/{total}, reconnecting and restarting from block 0...")
                 last_pct[0] = -1  # force redraw after reconnect
                 return
             pct = done * 100 // total
@@ -1097,14 +1097,22 @@ def flash_device(address, firmware_path, timeout):
     verify_timeout = 30.0
     verified: list[bool] = [False]
 
+    old_name_seen: list[bool] = [False]
+
     async def _verify_firmware():
         found_ev = asyncio.Event()
 
         def _det(device, adv):
             name = device.name or adv.local_name or ""
+            # If the MAC address is still advertising as LYWSD03MMC, the flash
+            # did not take — record it and stop waiting.
+            if device.address.upper() == address.upper() and name.upper().startswith("LYWSD03MMC"):
+                old_name_seen[0] = True
+                found_ev.set()
+                return
             # Match by expected ATC name, or by MAC address advertising as PVVX
             if name.upper() == atc_name.upper() or (
-                device.address.upper() == address and name.upper().startswith("ATC_")
+                device.address.upper() == address.upper() and name.upper().startswith("ATC_")
             ):
                 verified[0] = True
                 found_ev.set()
@@ -1120,7 +1128,14 @@ def flash_device(address, firmware_path, timeout):
     except KeyboardInterrupt:
         click.echo("\nVerification skipped.")
 
-    if verified[0]:
+    if old_name_seen[0]:
+        click.echo(
+            f"✗ Flash failed — {address} is still advertising as LYWSD03MMC.\n"
+            "   The sensor did not accept the new firmware. Try again:\n"
+            "   power the sensor off and back on, then re-run: smart-home flash"
+        )
+        return
+    elif verified[0]:
         click.echo(f"✓ Firmware verified — {atc_name} is advertising successfully.")
     else:
         click.echo(

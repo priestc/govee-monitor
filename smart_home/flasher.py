@@ -194,7 +194,6 @@ async def flash_firmware(
 
             await asyncio.sleep(_INTER_BLOCK_DELAY)
             block_num += 1
-            retries = 0  # reset retry counter after each successful write
             if progress:
                 progress(block_num, total_blocks)
 
