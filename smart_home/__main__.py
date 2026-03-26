@@ -111,6 +111,88 @@ DEVICE_TYPES = {
     "2": ("Xiaomi LYWSD03MMC",   ("LYWSD03MMC", "ATC_")),
 }
 
+THERMOSTAT_TYPES = {
+    "1": "Ecobee",
+}
+
+
+@main.command("add-thermostat")
+def add_thermostat():
+    """Register a smart thermostat to record its temperature data.
+
+    Authenticates with the thermostat's API, asks for the room name,
+    and saves config so that 'monitor' will poll it going forward.
+    """
+    from smart_home import ecobee as _ecobee
+
+    click.echo("What type of thermostat do you want to add?\n")
+    for key, name in THERMOSTAT_TYPES.items():
+        click.echo(f"  {key}. {name}")
+    click.prompt("\nEnter choice", type=click.Choice(list(THERMOSTAT_TYPES)))
+
+    click.echo("\nYou need an Ecobee developer API key.")
+    click.echo("Create one at ecobee.com: My Apps → Add Application → select 'ecobeePin'.\n")
+    api_key = click.prompt("Ecobee API key").strip()
+
+    click.echo("\nRequesting PIN from Ecobee...")
+    try:
+        pin_data = _ecobee.request_pin(api_key)
+    except Exception as e:
+        click.echo(f"Failed: {e}")
+        return
+
+    pin = pin_data["ecobeePin"]
+    code = pin_data["code"]
+    expires_min = pin_data.get("expires_in", 900) // 60
+    click.echo(f"\n  PIN: {pin}\n")
+    click.echo("Go to ecobee.com → My Account → My Apps → Add Application")
+    click.echo(f"and enter the PIN above. You have {expires_min} minutes.\n")
+    click.prompt("Press Enter when done", default="", prompt_suffix="", show_default=False)
+
+    click.echo("Authorizing...")
+    try:
+        token_data = _ecobee.authorize(api_key, code)
+    except Exception as e:
+        click.echo(f"Authorization failed: {e}")
+        return
+
+    cfg = {
+        "api_key": api_key,
+        "access_token": token_data["access_token"],
+        "refresh_token": token_data["refresh_token"],
+        "label": "",
+    }
+
+    click.echo("Connected! Fetching thermostat info...")
+    try:
+        thermostats = _ecobee.get_thermostats(cfg)
+    except Exception as e:
+        click.echo(f"Failed to fetch thermostat data: {e}")
+        return
+
+    if not thermostats:
+        click.echo("No thermostats found on this account.")
+        return
+
+    if len(thermostats) == 1:
+        t = thermostats[0]
+        click.echo(f'Found: "{t["name"]}" (serial: {t["identifier"]})')
+    else:
+        click.echo(f"\nFound {len(thermostats)} thermostat(s):\n")
+        for i, t in enumerate(thermostats, 1):
+            click.echo(f"  {i}. {t['name']} ({t['identifier']})")
+        idx = click.prompt("Which one?", type=click.IntRange(1, len(thermostats))) - 1
+        t = thermostats[idx]
+
+    room = click.prompt("\nWhat room is this thermostat in?").strip().lower().replace(" ", "-")
+    label = f"indoor-{room}"
+    click.echo(f"Label: {label}")
+
+    cfg["label"] = label
+    cfg["identifier"] = t["identifier"]
+    _ecobee.save_config(cfg)
+    click.echo(f"\nSaved. Run 'smart-home monitor' to start polling this thermostat.")
+
 
 @main.command("install-services")
 def install_services():
@@ -781,11 +863,32 @@ def monitor(duration, verbose, db, no_db):
                     except RuntimeError:
                         pass
 
+    from smart_home import ecobee as _ecobee
+    ecobee_cfg = _ecobee.load_config()
+
+    async def poll_ecobee_loop():
+        nonlocal ecobee_cfg
+        label = ecobee_cfg.get("label", "ecobee")
+        click.echo(f"Ecobee thermostat configured: {label}")
+        POLL_INTERVAL = 180  # 3 minutes — matches Ecobee's runtime update frequency
+        while True:
+            try:
+                reading, ecobee_cfg = _ecobee.fetch_reading(ecobee_cfg)
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                click.echo(f"[{ts}] {reading}")
+                latest_reading[reading.address] = reading
+            except Exception as e:
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                click.echo(f"[{ts}] Ecobee poll failed: {e}")
+            await asyncio.sleep(POLL_INTERVAL)
+
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
         extra = [check_missing_sensors(), snapshot_loop()]
         if presence_devices:
             extra.append(check_presence())
+        if ecobee_cfg:
+            extra.append(poll_ecobee_loop())
         asyncio.run(scan(
             on_reading,
             duration=duration,
