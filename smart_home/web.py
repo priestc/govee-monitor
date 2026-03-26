@@ -547,7 +547,7 @@ function makeChart(ctx, label) {
           grid:  { color: "#e8eef4" }
         },
         y: {
-          ticks: { color: "#7a90a8", callback: v => v + "°F" },
+          ticks: { color: "#7a90a8", callback: v => (+v).toFixed(1) + "°F" },
           grid:  { color: "#e8eef4" }
         }
       }
@@ -1017,7 +1017,7 @@ const chart = new Chart(document.getElementById("chart"), {
     plugins: { legend: { labels: { color: "#4a6080" } } },
     scales: {
       x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 8 }, grid: { color: "#e8eef4" } },
-      y: { ticks: { color: "#7a90a8", callback: v => v + "\\u00b0F" }, grid: { color: "#e8eef4" } }
+      y: { ticks: { color: "#7a90a8", callback: v => (+v).toFixed(1) + "\\u00b0F" }, grid: { color: "#e8eef4" } }
     }
   }
 });
@@ -1107,7 +1107,7 @@ const chart = new Chart(document.getElementById("chart"), {
     plugins: { legend: { display: false } },
     scales: {
       x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 8 }, grid: { color: "#e8eef4" } },
-      y: { ticks: { color: "#7a90a8", callback: v => v + "\u00b0F" }, grid: { color: ctx => ctx.tick.value === 0 ? "#aabbc8" : "#e8eef4" } }
+      y: { ticks: { color: "#7a90a8", callback: v => (+v).toFixed(1) + "\u00b0F" }, grid: { color: ctx => ctx.tick.value === 0 ? "#aabbc8" : "#e8eef4" } }
     }
   }
 });
