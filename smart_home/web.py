@@ -873,11 +873,17 @@ function setSensorMode(mode, btn) {
   loadChart();
 }
 
+// Returns true if a label belongs to an indoor/inside sensor
+function isIndoorLabel(l) {
+  const lo = l.toLowerCase();
+  return lo.startsWith('indoor-') || lo.startsWith('inside-');
+}
+
 // Build datasets from raw API data according to active sensor modes
 function buildSensorDatasets(data, isMonth) {
   // Collect all labels from the data
   const allLabels = [...new Set(data.map(r => r.label).filter(Boolean))];
-  const indoorLabels = allLabels.filter(l => l.toLowerCase().startsWith('indoor-'));
+  const indoorLabels = allLabels.filter(isIndoorLabel);
   const datasets = [];
 
   function makePoints(rows, labelKey, tsKey) {
@@ -917,7 +923,7 @@ function buildSensorDatasets(data, isMonth) {
     }
   }
 
-  // Indoor average — average all indoor-* sensors at each timestamp
+  // Indoor average — average all indoor/inside sensors at each timestamp
   if (activeModes.has('indoor-avg') && indoorLabels.length > 0) {
     if (isMonth) {
       // group by year
@@ -950,7 +956,7 @@ function buildSensorDatasets(data, isMonth) {
     }
   }
 
-  // By room — one line per indoor-* sensor
+  // By room — one line per indoor/inside sensor
   if (activeModes.has('by-room') && indoorLabels.length > 0) {
     const roomColors = ['#9b4dca','#c0392b','#16a085','#d35400','#8e44ad','#27ae60','#2980b9','#e74c3c','#f39c12'];
     indoorLabels.sort().forEach((lbl, idx) => {
