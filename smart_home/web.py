@@ -809,11 +809,8 @@ _TEMP_PAGE = """\
       <button onclick="setSensorMode('outside-sun', this)" id="btn-outside-sun" class="active">Outside (sun)</button>
       <button onclick="setSensorMode('outside-shade', this)" id="btn-outside-shade" class="active">Outside (shade)</button>
       <button onclick="setSensorMode('indoor-avg', this)" id="btn-indoor-avg" class="active">Indoor average</button>
+      <button onclick="setSensorMode('diff', this)" id="btn-diff">Inside/outside difference</button>
     </div>
-  </div>
-  <div class="btn-group" id="room-btn-group" style="display:none">
-    <div class="btn-group-label">Rooms</div>
-    <div class="range-btns" id="room-btns"></div>
   </div>
   <div class="btn-group">
     <div class="btn-group-label">Most Recent</div>
@@ -977,6 +974,44 @@ function buildSensorDatasets(data, isMonth) {
     }
   });
 
+  // Inside/outside difference — indoor average minus outside-shade at each timestamp
+  if (activeModes.has('diff')) {
+    const shadeLbl = allLabels.find(l => l.toLowerCase().replace(/[_\s]/g,'-') === 'outside-shade');
+    if (shadeLbl && indoorLabels.length > 0) {
+      if (isMonth) {
+        const years = [...new Set(data.map(r => r.year).filter(Boolean))].sort();
+        years.forEach((year, yi) => {
+          const shadeMap = {};
+          data.filter(r => r.label === shadeLbl && r.year === year).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+          const indoorMap = {};
+          data.filter(r => indoorLabels.includes(r.label) && r.year === year && r.temp_f != null)
+            .forEach(r => { (indoorMap[r.ts] ??= []).push(r.temp_f); });
+          const pts = Object.entries(indoorMap)
+            .filter(([ts]) => shadeMap[ts] != null)
+            .map(([ts, vals]) => ({ x: new Date(ts), y: vals.reduce((a,b)=>a+b,0)/vals.length - shadeMap[ts] }))
+            .sort((a,b) => a.x - b.x);
+          datasets.push({ label: `Difference ${year}`, data: pts,
+            borderColor: '#9b4dca', backgroundColor: 'transparent',
+            borderWidth: 1.5, pointRadius: 0, tension: 0,
+            borderDash: yi > 0 ? [4,3] : [] });
+        });
+      } else {
+        const shadeMap = {};
+        data.filter(r => r.label === shadeLbl && r.temp_f != null).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+        const indoorMap = {};
+        data.filter(r => indoorLabels.includes(r.label) && r.temp_f != null)
+          .forEach(r => { (indoorMap[r.ts] ??= []).push(r.temp_f); });
+        const pts = Object.entries(indoorMap)
+          .filter(([ts]) => shadeMap[ts] != null)
+          .map(([ts, vals]) => ({ x: new Date(ts), y: vals.reduce((a,b)=>a+b,0)/vals.length - shadeMap[ts] }))
+          .sort((a,b) => a.x - b.x);
+        datasets.push({ label: 'Inside/outside difference', data: pts,
+          borderColor: '#9b4dca', backgroundColor: 'transparent',
+          borderWidth: 1.5, pointRadius: 0, tension: 0 });
+      }
+    }
+  }
+
   return datasets;
 }
 
@@ -989,22 +1024,20 @@ async function loadColors() {
   data.map(s => s.label).filter(Boolean).sort()
     .forEach((lbl, i) => { colorMap[lbl] = COLORS[i % COLORS.length]; });
   const indoorLabels = data.map(s => s.label).filter(l => l && isIndoorLabel(l)).sort();
-  const roomBtns = document.getElementById('room-btns');
-  const roomGroup = document.getElementById('room-btn-group');
-  if (indoorLabels.length > 0) {
-    roomGroup.style.display = '';
-    const existing = [...roomBtns.querySelectorAll('button')].map(b => b.dataset.room);
-    if (JSON.stringify(existing) !== JSON.stringify(indoorLabels)) {
-      roomBtns.innerHTML = '';
-      indoorLabels.forEach(lbl => {
-        const btn = document.createElement('button');
-        btn.dataset.room = lbl;
-        btn.textContent = lbl.replace(/^in(door|side)-/i, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        btn.onclick = () => setSensorMode(lbl, btn);
-        if (activeModes.has(lbl)) btn.classList.add('active');
-        roomBtns.appendChild(btn);
-      });
-    }
+  const sensorBtns = document.getElementById('sensor-btns');
+  const existingRoomBtns = [...sensorBtns.querySelectorAll('button[data-room]')];
+  const existing = existingRoomBtns.map(b => b.dataset.room);
+  if (JSON.stringify(existing) !== JSON.stringify(indoorLabels)) {
+    existingRoomBtns.forEach(b => b.remove());
+    indoorLabels.forEach(lbl => {
+      const btn = document.createElement('button');
+      btn.dataset.room = lbl;
+      btn.textContent = lbl.replace(/^in(door|side)-/i, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      btn.onclick = () => setSensorMode(lbl, btn);
+      if (activeModes.has(lbl)) btn.classList.add('active');
+      const diffBtn = document.getElementById('btn-diff');
+      sensorBtns.insertBefore(btn, diffBtn);
+    });
   }
 }
 function setRange(days) {
