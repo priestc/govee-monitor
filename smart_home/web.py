@@ -879,20 +879,20 @@ function isIndoorLabel(l) {
   return lo.startsWith('indoor-') || lo.startsWith('inside-');
 }
 
-// Snap a Date to the nearest bucket boundary (bucketMs = bucket size in milliseconds)
-function snapToBucket(date, bucketMs) {
-  return Math.floor(date.getTime() / bucketMs) * bucketMs;
+// Apply a simple N-point moving average to an array of {x, y} points
+function smoothPoints(pts, n) {
+  return pts.map((p, i) => {
+    const slice = pts.slice(Math.max(0, i - n + 1), i + 1);
+    const avg = slice.reduce((s, v) => s + v.y, 0) / slice.length;
+    return { x: p.x, y: avg };
+  });
 }
 
 // Build datasets from raw API data according to active sensor modes
 function buildSensorDatasets(data, isMonth) {
-  // Collect all labels from the data
   const allLabels = [...new Set(data.map(r => r.label).filter(Boolean))];
   const indoorLabels = allLabels.filter(isIndoorLabel);
   const datasets = [];
-  // bucket size in ms — used to snap indoor avg timestamps so sensors with slightly
-  // different polling times collapse into the same bucket and get averaged together
-  const bucketMs = getBucket() * 60 * 1000;
 
   function makePoints(rows, labelKey, tsKey) {
     const byKey = {};
@@ -903,13 +903,12 @@ function buildSensorDatasets(data, isMonth) {
     return byKey;
   }
 
-  // Outside (sun) — label: 'outside-sun' or 'outside_sun' etc.
+  // Outside (sun)
   if (activeModes.has('outside-sun')) {
     const lbl = allLabels.find(l => l.toLowerCase().replace(/[_\s]/g,'-') === 'outside-sun');
     if (lbl) {
-      const rows = data.filter(r => r.label === lbl);
-      const pts = makePoints(rows, 'label', 'ts');
-      Object.entries(pts).forEach(([key, points], i) => {
+      const pts = makePoints(data.filter(r => r.label === lbl), 'label', 'ts');
+      Object.entries(pts).forEach(([key, points]) => {
         datasets.push({ label: isMonth ? `Outside (sun) ${key.split(' ').pop()}` : 'Outside (sun)',
           data: points, borderColor: '#e07820', backgroundColor: 'transparent',
           borderWidth: 1.5, pointRadius: 0, tension: 0 });
@@ -917,13 +916,12 @@ function buildSensorDatasets(data, isMonth) {
     }
   }
 
-  // Outside (shade) — label: 'outside-shade' or 'outside_shade' etc.
+  // Outside (shade)
   if (activeModes.has('outside-shade')) {
     const lbl = allLabels.find(l => l.toLowerCase().replace(/[_\s]/g,'-') === 'outside-shade');
     if (lbl) {
-      const rows = data.filter(r => r.label === lbl);
-      const pts = makePoints(rows, 'label', 'ts');
-      Object.entries(pts).forEach(([key, points], i) => {
+      const pts = makePoints(data.filter(r => r.label === lbl), 'label', 'ts');
+      Object.entries(pts).forEach(([key, points]) => {
         datasets.push({ label: isMonth ? `Outside (shade) ${key.split(' ').pop()}` : 'Outside (shade)',
           data: points, borderColor: '#2e7dd4', backgroundColor: 'transparent',
           borderWidth: 1.5, pointRadius: 0, tension: 0 });
@@ -931,38 +929,34 @@ function buildSensorDatasets(data, isMonth) {
     }
   }
 
-  // Indoor average — average all indoor/inside sensors, snapping timestamps to bucket
-  // grid so sensors with slightly different poll times collapse into the same bucket.
+  // Indoor average — average sensors per timestamp, then apply 5-point moving average
+  // to smooth out sensor noise that causes stair-stepping at high resolution
   if (activeModes.has('indoor-avg') && indoorLabels.length > 0) {
     if (isMonth) {
-      const years = [...new Set(data.map(r => r.year).filter(Boolean))];
-      years.sort().forEach((year, yi) => {
+      const years = [...new Set(data.map(r => r.year).filter(Boolean))].sort();
+      years.forEach(year => {
         const yearRows = data.filter(r => r.year === year && indoorLabels.includes(r.label));
-        const bucketMap = {};
-        for (const row of yearRows) {
-          const snapped = snapToBucket(new Date(row.ts), bucketMs);
-          (bucketMap[snapped] ??= []).push(row.temp_f);
-        }
-        const pts = Object.entries(bucketMap)
-          .map(([ms, vals]) => ({ x: new Date(+ms), y: +(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) }))
+        const tsMap = {};
+        for (const row of yearRows) (tsMap[row.ts] ??= []).push(row.temp_f);
+        const raw = Object.entries(tsMap)
+          .map(([ts, vals]) => ({ x: new Date(ts), y: vals.reduce((a,b)=>a+b,0)/vals.length }))
           .sort((a,b) => a.x - b.x);
-        datasets.push({ label: `Indoor average ${year}`, data: pts,
+        datasets.push({ label: `Indoor average ${year}`, data: smoothPoints(raw, 5),
           borderColor: '#2a9d6e', backgroundColor: 'transparent',
-          borderWidth: 2, pointRadius: 0, tension: 0 });
+          borderWidth: 2, pointRadius: 0, tension: 0.3 });
       });
     } else {
-      const bucketMap = {};
+      const tsMap = {};
       for (const row of data) {
         if (!indoorLabels.includes(row.label) || row.temp_f == null) continue;
-        const snapped = snapToBucket(new Date(row.ts), bucketMs);
-        (bucketMap[snapped] ??= []).push(row.temp_f);
+        (tsMap[row.ts] ??= []).push(row.temp_f);
       }
-      const pts = Object.entries(bucketMap)
-        .map(([ms, vals]) => ({ x: new Date(+ms), y: +(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) }))
+      const raw = Object.entries(tsMap)
+        .map(([ts, vals]) => ({ x: new Date(ts), y: vals.reduce((a,b)=>a+b,0)/vals.length }))
         .sort((a,b) => a.x - b.x);
-      datasets.push({ label: 'Indoor average', data: pts,
+      datasets.push({ label: 'Indoor average', data: smoothPoints(raw, 5),
         borderColor: '#2a9d6e', backgroundColor: 'transparent',
-        borderWidth: 2, pointRadius: 0, tension: 0 });
+        borderWidth: 2, pointRadius: 0, tension: 0.3 });
     }
   }
 
@@ -974,8 +968,8 @@ function buildSensorDatasets(data, isMonth) {
       if (isMonth) {
         const years = [...new Set(data.map(r => r.year).filter(Boolean))].sort();
         years.forEach((year, yi) => {
-          const rows = data.filter(r => r.label === lbl && r.year === year);
-          const pts = rows.map(r => ({ x: new Date(r.ts), y: r.temp_f })).sort((a,b)=>a.x-b.x);
+          const pts = data.filter(r => r.label === lbl && r.year === year)
+            .map(r => ({ x: new Date(r.ts), y: r.temp_f })).sort((a,b)=>a.x-b.x);
           datasets.push({ label: `${lbl} ${year}`, data: pts,
             borderColor: color, backgroundColor: 'transparent',
             borderWidth: 1.5, pointRadius: 0, tension: 0,
