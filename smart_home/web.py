@@ -799,7 +799,7 @@ _TEMP_PAGE = """\
   <div class="res-row">
     <label for="res">Resolution</label>
     <select id="res" onchange="resolution=this.value; loadChart()">
-      <option value="low" selected>Low</option>
+      <option value="low">Low</option>
       <option value="medium">Medium</option>
       <option value="max">Max</option>
     </select>
@@ -846,7 +846,10 @@ const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d3
 const colorMap = {};
 function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
 let mode = "recent", rangeDays = 1, activeMonth = null;
-let resolution = "low";
+const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const isLocal = /^192\\.168\\./.test(location.hostname);
+let resolution = isLocal ? "max" : isMobile ? "low" : "medium";
+document.getElementById("res").value = resolution;
 const BUCKETS = {
   recent: {
     low:    {0.125:10, 1:30,  3:60,  7:120, 30:360},
