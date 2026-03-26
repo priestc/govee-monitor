@@ -113,6 +113,7 @@ DEVICE_TYPES = {
 
 THERMOSTAT_TYPES = {
     "1": "Ecobee",
+    "2": "Home Assistant (via local API)",
 }
 
 
@@ -123,12 +124,19 @@ def add_thermostat():
     Authenticates with the thermostat's API, asks for the room name,
     and saves config so that 'monitor' will poll it going forward.
     """
-    from smart_home import ecobee as _ecobee
-
     click.echo("What type of thermostat do you want to add?\n")
     for key, name in THERMOSTAT_TYPES.items():
         click.echo(f"  {key}. {name}")
-    click.prompt("\nEnter choice", type=click.Choice(list(THERMOSTAT_TYPES)))
+    choice = click.prompt("\nEnter choice", type=click.Choice(list(THERMOSTAT_TYPES)))
+
+    if choice == "1":
+        _add_thermostat_ecobee()
+    elif choice == "2":
+        _add_thermostat_homeassistant()
+
+
+def _add_thermostat_ecobee():
+    from smart_home import ecobee as _ecobee
 
     click.echo("\nYou need an Ecobee developer API key.")
     click.echo("Create one at ecobee.com: My Apps → Add Application → select 'ecobeePin'.\n")
@@ -191,7 +199,57 @@ def add_thermostat():
     cfg["label"] = label
     cfg["identifier"] = t["identifier"]
     _ecobee.save_config(cfg)
-    click.echo(f"\nSaved. Run 'smart-home monitor' to start polling this thermostat.")
+    click.echo("\nSaved. Run 'smart-home monitor' to start polling this thermostat.")
+
+
+def _add_thermostat_homeassistant():
+    from smart_home import homeassistant as _ha
+
+    click.echo("\nYou'll need a long-lived access token from Home Assistant.")
+    click.echo("Go to your HA profile page → Long-Lived Access Tokens → Create Token.\n")
+    url = click.prompt("Home Assistant URL (e.g. http://homeassistant.local:8123)").strip().rstrip("/")
+    token = click.prompt("Long-lived access token").strip()
+
+    cfg = {"url": url, "token": token, "entity_id": "", "label": ""}
+
+    click.echo("\nConnecting...")
+    try:
+        _ha.test_connection(cfg)
+    except Exception as e:
+        click.echo(f"Connection failed: {e}")
+        return
+
+    click.echo("Connected! Fetching climate entities...")
+    try:
+        entities = _ha.get_climate_entities(cfg)
+    except Exception as e:
+        click.echo(f"Failed to fetch entities: {e}")
+        return
+
+    if not entities:
+        click.echo("No climate entities with temperature data found in Home Assistant.")
+        return
+
+    click.echo(f"\nFound {len(entities)} thermostat(s):\n")
+    for i, e in enumerate(entities, 1):
+        temp = e["current_temperature"]
+        hum = f"  humidity={e['current_humidity']}%" if e["current_humidity"] is not None else ""
+        click.echo(f"  {i}. {e['name']} ({e['entity_id']})  temp={temp}°F{hum}")
+
+    if len(entities) == 1:
+        entity = entities[0]
+    else:
+        idx = click.prompt("\nWhich one?", type=click.IntRange(1, len(entities))) - 1
+        entity = entities[idx]
+
+    room = click.prompt("\nWhat room is this thermostat in?").strip().lower().replace(" ", "-")
+    label = f"indoor-{room}"
+    click.echo(f"Label: {label}")
+
+    cfg["entity_id"] = entity["entity_id"]
+    cfg["label"] = label
+    _ha.save_config(cfg)
+    click.echo("\nSaved. Run 'smart-home monitor' to start polling this thermostat.")
 
 
 @main.command("install-services")
@@ -864,7 +922,24 @@ def monitor(duration, verbose, db, no_db):
                         pass
 
     from smart_home import ecobee as _ecobee
+    from smart_home import homeassistant as _ha
     ecobee_cfg = _ecobee.load_config()
+    ha_cfg = _ha.load_config()
+
+    async def poll_homeassistant_loop():
+        label = ha_cfg.get("label", "home-assistant")
+        click.echo(f"Home Assistant thermostat configured: {label}")
+        POLL_INTERVAL = 180
+        while True:
+            try:
+                reading = _ha.fetch_reading(ha_cfg)
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                click.echo(f"[{ts}] {reading}")
+                latest_reading[reading.address] = reading
+            except Exception as e:
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                click.echo(f"[{ts}] Home Assistant poll failed: {e}")
+            await asyncio.sleep(POLL_INTERVAL)
 
     async def poll_ecobee_loop():
         nonlocal ecobee_cfg
@@ -889,6 +964,8 @@ def monitor(duration, verbose, db, no_db):
             extra.append(check_presence())
         if ecobee_cfg:
             extra.append(poll_ecobee_loop())
+        if ha_cfg:
+            extra.append(poll_homeassistant_loop())
         asyncio.run(scan(
             on_reading,
             duration=duration,
