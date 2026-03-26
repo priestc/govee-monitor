@@ -988,7 +988,7 @@ async function loadColors() {
   const data = await fetch("/api/current").then(r => r.json());
   data.map(s => s.label).filter(Boolean).sort()
     .forEach((lbl, i) => { colorMap[lbl] = COLORS[i % COLORS.length]; });
-  const indoorLabels = data.map(s => s.label).filter(l => l && l.toLowerCase().startsWith('indoor-')).sort();
+  const indoorLabels = data.map(s => s.label).filter(l => l && isIndoorLabel(l)).sort();
   const roomBtns = document.getElementById('room-btns');
   const roomGroup = document.getElementById('room-btn-group');
   if (indoorLabels.length > 0) {
@@ -999,7 +999,7 @@ async function loadColors() {
       indoorLabels.forEach(lbl => {
         const btn = document.createElement('button');
         btn.dataset.room = lbl;
-        btn.textContent = lbl.replace(/^indoor-/i, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        btn.textContent = lbl.replace(/^in(door|side)-/i, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
         btn.onclick = () => setSensorMode(lbl, btn);
         if (activeModes.has(lbl)) btn.classList.add('active');
         roomBtns.appendChild(btn);
