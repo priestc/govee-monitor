@@ -138,8 +138,8 @@ def history():
       bucket_minutes - group readings into N-minute buckets (optional)
     """
     label = request.args.get("label")
-    start = request.args.get("start")
-    end   = request.args.get("end")
+    start = (request.args.get("start") or "").replace("T", " ") or None
+    end   = (request.args.get("end")   or "").replace("T", " ") or None
     try:
         limit = min(int(request.args.get("limit", 1000)), 200000)
     except ValueError:
@@ -166,7 +166,7 @@ def history():
         bucket_secs = bucket * 60
         sql = f"""
             SELECT
-                strftime('%Y-%m-%dT%H:%M:%S', CAST(strftime('%s', ts) AS INTEGER) / {bucket_secs} * {bucket_secs}, 'unixepoch') AS ts,
+                strftime('%Y-%m-%d %H:%M:%S', CAST(strftime('%s', ts) AS INTEGER) / {bucket_secs} * {bucket_secs}, 'unixepoch') AS ts,
                 label,
                 ROUND(AVG(temp_f), 2)  AS temp_f,
                 ROUND(AVG(humidity), 2) AS humidity,
@@ -200,7 +200,7 @@ def history_month():
         rows = conn.execute("""
             SELECT
                 strftime('%Y', ts) AS year,
-                CAST(strftime('%s', '2000' || substr(replace(ts,'T',' '), 5)) AS INTEGER) / ? * ? AS bucket,
+                CAST(strftime('%s', '2000' || substr(ts, 5)) AS INTEGER) / ? * ? AS bucket,
                 label,
                 ROUND(AVG(temp_f), 1) AS temp_f
             FROM readings
@@ -212,7 +212,7 @@ def history_month():
     result = []
     for r in rows:
         d = dict(r)
-        ts = _dt.datetime.utcfromtimestamp(d["bucket"]).strftime("%Y-%m-%dT%H:%M:%S")
+        ts = _dt.datetime.utcfromtimestamp(d["bucket"]).strftime("%Y-%m-%d %H:%M:%S")
         result.append({"year": d["year"], "ts": ts, "label": d["label"], "temp_f": d["temp_f"]})
     return jsonify(result)
 
@@ -230,7 +230,7 @@ def history_year():
         rows = conn.execute("""
             SELECT
                 strftime('%Y', ts) AS year,
-                CAST(strftime('%s', '2000' || substr(replace(ts,'T',' '), 5)) AS INTEGER) / ? * ? AS bucket,
+                CAST(strftime('%s', '2000' || substr(ts, 5)) AS INTEGER) / ? * ? AS bucket,
                 label,
                 ROUND(AVG(temp_f), 1) AS temp_f
             FROM readings
@@ -241,7 +241,7 @@ def history_year():
     result = []
     for r in rows:
         d = dict(r)
-        ts = _dt.datetime.utcfromtimestamp(d["bucket"]).strftime("%Y-%m-%dT%H:%M:%S")
+        ts = _dt.datetime.utcfromtimestamp(d["bucket"]).strftime("%Y-%m-%d %H:%M:%S")
         result.append({"year": d["year"], "ts": ts, "label": d["label"], "temp_f": d["temp_f"]})
     return jsonify(result)
 
@@ -718,7 +718,7 @@ function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
 let rangeDays = 1;
 function localISO(d) {
   const p = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 async function loadColors() {
   const data = await fetch("/api/current").then(r => r.json());
@@ -1026,7 +1026,7 @@ function buildSensorDatasets(data, isMonth) {
 
 function localISO(d) {
   const p = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 async function loadColors() {
   const data = await fetch("/api/current").then(r => r.json());

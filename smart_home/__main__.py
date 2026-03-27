@@ -426,7 +426,7 @@ def import_zip(zipfile_path, label, db):
             for line in reader:
                 if len(line) < 3:
                     continue
-                ts = line[0].strip().replace(" ", "T")
+                ts = line[0].strip()
                 try:
                     temp_f = float(line[1].strip())
                     humidity = float(line[2].strip())
@@ -765,7 +765,7 @@ def monitor(duration, verbose, db, no_db):
                             body=f"{label} left home",
                         )
                     _presence.append_history({
-                        "ts": now.isoformat(timespec="seconds"),
+                        "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
                         "ble_name": ble_name,
                         "label": label,
                         "status": new_status,
@@ -886,7 +886,7 @@ def monitor(duration, verbose, db, no_db):
             await asyncio.sleep(60)
             if not conn or not latest_reading:
                 continue
-            ts = datetime.datetime.now().replace(second=0, microsecond=0).isoformat(timespec="seconds")
+            ts = datetime.datetime.now().replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
             for addr, reading in list(latest_reading.items()):
                 conn.execute(
                     "INSERT OR IGNORE INTO readings (ts, address, label, temp_f, humidity, rssi, battery, raw_reading) VALUES (?,?,?,?,?,?,?,?)",

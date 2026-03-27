@@ -27,7 +27,7 @@ def open_db(path: str) -> sqlite3.Connection:
 
 
 def insert_reading(conn: sqlite3.Connection, reading) -> None:
-    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT OR IGNORE INTO readings (ts, address, label, temp_f, humidity, rssi, battery, raw_reading) VALUES (?,?,?,?,?,?,?,?)",
         (ts, reading.address, reading.label, reading.temp_f, reading.humidity, reading.rssi, reading.battery, reading.raw_reading),
@@ -36,7 +36,7 @@ def insert_reading(conn: sqlite3.Connection, reading) -> None:
 
 
 def insert_no_reading(conn: sqlite3.Connection, label: str, address: str | None = None) -> None:
-    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT OR IGNORE INTO readings (ts, address, label, temp_f, humidity) VALUES (?,?,?,NULL,NULL)",
         (ts, address, label),
