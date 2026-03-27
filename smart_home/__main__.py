@@ -957,9 +957,26 @@ def monitor(duration, verbose, db, no_db):
                 click.echo(f"[{ts}] Ecobee poll failed: {e}")
             await asyncio.sleep(POLL_INTERVAL)
 
+    from smart_home.events import detect_and_insert_events
+
+    async def check_events_loop():
+        """After each snapshot cycle, scan for parity crossing events."""
+        await asyncio.sleep(65)  # let the first snapshot settle
+        while True:
+            if conn:
+                try:
+                    n = detect_and_insert_events(conn)
+                    if n:
+                        ts = datetime.datetime.now().strftime("%H:%M:%S")
+                        click.echo(f"[{ts}] Temperature event(s) detected: {n}")
+                except Exception as e:
+                    ts = datetime.datetime.now().strftime("%H:%M:%S")
+                    click.echo(f"[{ts}] Event check failed: {e}")
+            await asyncio.sleep(60)
+
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
-        extra = [check_missing_sensors(), snapshot_loop()]
+        extra = [check_missing_sensors(), snapshot_loop(), check_events_loop()]
         if presence_devices:
             extra.append(check_presence())
         if ecobee_cfg:

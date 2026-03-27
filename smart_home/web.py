@@ -1278,6 +1278,81 @@ async function loadChart() {
     )
 
 
+@app.get("/api/events")
+def events_api():
+    """Recent temperature parity events."""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    from smart_home.events import get_recent_events
+    with _conn() as conn:
+        events = get_recent_events(conn, limit=limit)
+    return jsonify(events)
+
+
+@app.get("/events")
+def events_page():
+    EVENT_LABELS = {
+        "sun_shade_parity": "Sun / Shade Parity",
+        "inside_outside_parity": "Inside / Outside Parity",
+    }
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Temperature Events &mdash; Smart Home</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem; color: #1a2535; letter-spacing: -.02em; }
+    .back { font-size: .85rem; font-weight: 500; color: #2e7dd4; text-decoration: none; margin-left: .6rem; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); }
+    th { background: #f7fafc; font-size: .72rem; font-weight: 600; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; padding: .6rem 1rem; text-align: left; border-bottom: 1px solid #e8eef4; }
+    td { padding: .7rem 1rem; font-size: .88rem; border-bottom: 1px solid #f0f4f8; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: .2rem .55rem; border-radius: 20px; font-size: .72rem; font-weight: 600; letter-spacing: .03em; }
+    .badge-sun  { background: #fff3e0; color: #d4760a; }
+    .badge-io   { background: #e8f4fd; color: #1a6db5; }
+    .val  { font-weight: 700; color: #e07820; }
+    .det  { color: #7a90a8; font-size: .8rem; margin-top: .15rem; }
+    .empty { text-align: center; color: #aabbc8; padding: 3rem 1rem; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Temperature Events <a href="/" class="back">&larr; Dashboard</a></h1>
+  <table>
+    <thead><tr><th>Time</th><th>Event</th><th>Temperature</th><th>Details</th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="4" class="empty">Loading&hellip;</td></tr></tbody>
+  </table>
+<script>
+const EVENT_LABELS = """ + str(EVENT_LABELS).replace("'", '"') + """;
+async function load() {
+  const data = await fetch("/api/events?limit=100").then(r => r.json());
+  const tbody = document.getElementById("tbody");
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No events recorded yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(e => {
+    const label = EVENT_LABELS[e.event_type] || e.event_type;
+    const badgeClass = e.event_type === "sun_shade_parity" ? "badge-sun" : "badge-io";
+    const ts = e.ts.replace(" ", "T");
+    const timeStr = new Date(ts).toLocaleString();
+    const val = e.value != null ? `${e.value.toFixed(1)}&deg;F` : "&mdash;";
+    return `<tr>
+      <td>${timeStr}</td>
+      <td><span class="badge ${badgeClass}">${label}</span></td>
+      <td class="val">${val}</td>
+      <td><div class="det">${e.details || ""}</div></td>
+    </tr>`;
+  }).join("");
+}
+load();
+</script>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
+
+
 @app.get("/")
 def index():
     html = """<!DOCTYPE html>
@@ -1323,6 +1398,7 @@ def index():
     <a href="/chart/temperature" class="chart-link"><span class="cl-title">Temperature</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/chart/humidity"    class="chart-link"><span class="cl-title">Humidity</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/chart/differential" class="chart-link"><span class="cl-title">Inside / Outside Differential</span><span class="cl-arrow">&#8594;</span></a>
+    <a href="/events"            class="chart-link"><span class="cl-title">Temperature Events</span><span class="cl-arrow">&#8594;</span></a>
   </div>
 
 <script>

@@ -22,6 +22,16 @@ def open_db(path: str) -> sqlite3.Connection:
             UNIQUE(ts, label)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS temperature_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          TEXT    NOT NULL,
+            event_type  TEXT    NOT NULL,
+            value       REAL,
+            details     TEXT,
+            UNIQUE(ts, event_type)
+        )
+    """)
     conn.commit()
     return conn
 
