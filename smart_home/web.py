@@ -998,7 +998,7 @@ function buildSensorDatasets(data, isMonth) {
             data: allPts.map(p => ({ x: p.x, y: p.y > 0 ? p.y : null })),
             borderColor: '#e74c3c', borderWidth: 1.5, pointRadius: 0, tension: 0, borderDash: dash });
           datasets.push({ label: `Degrees cooler inside ${year}`, backgroundColor: 'transparent',
-            data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? -p.y : null })),
+            data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? p.y : null })),
             borderColor: '#2980b9', borderWidth: 1.5, pointRadius: 0, tension: 0, borderDash: dash });
         });
       } else {
@@ -1015,7 +1015,7 @@ function buildSensorDatasets(data, isMonth) {
           data: allPts.map(p => ({ x: p.x, y: p.y > 0 ? p.y : null })),
           borderColor: '#e74c3c', borderWidth: 1.5, pointRadius: 0, tension: 0 });
         datasets.push({ label: 'Degrees cooler inside', backgroundColor: 'transparent',
-          data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? -p.y : null })),
+          data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? p.y : null })),
           borderColor: '#2980b9', borderWidth: 1.5, pointRadius: 0, tension: 0 });
       }
     }
