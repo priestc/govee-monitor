@@ -806,7 +806,7 @@ _TEMP_PAGE = """\
   </div>
   <div class="btn-group">
     <div class="range-btns" id="sensor-btns">
-      <button onclick="setSensorMode('outside-sun', this)" id="btn-outside-sun" class="active">Outside (sun)</button>
+      <button onclick="setSensorMode('outside-sun', this)" id="btn-outside-sun">Outside (sun)</button>
       <button onclick="setSensorMode('outside-shade', this)" id="btn-outside-shade" class="active">Outside (shade)</button>
       <button onclick="setSensorMode('indoor-avg', this)" id="btn-indoor-avg" class="active">Indoor average</button>
       <button onclick="setSensorMode('diff', this)" id="btn-diff">Inside/outside difference</button>
@@ -864,7 +864,7 @@ function getBucket() {
   return BUCKETS[mode][resolution];
 }
 // Sensor view mode: which of the 4 buttons are active (multi-select)
-const activeModes = new Set(['outside-sun', 'outside-shade', 'indoor-avg']);
+const activeModes = new Set(['outside-shade', 'indoor-avg']);
 function setSensorMode(mode, btn) {
   if (activeModes.has(mode)) {
     activeModes.delete(mode);
