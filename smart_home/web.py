@@ -810,6 +810,7 @@ _TEMP_PAGE = """\
       <button onclick="setSensorMode('outside-shade', this)" id="btn-outside-shade" class="active">Outside (shade)</button>
       <button onclick="setSensorMode('indoor-avg', this)" id="btn-indoor-avg" class="active">Indoor average</button>
       <button onclick="setSensorMode('diff', this)" id="btn-diff">Inside/outside difference</button>
+      <button onclick="setSensorMode('sun-shade-diff', this)" id="btn-sun-shade-diff">Shade/sun differential</button>
     </div>
   </div>
   <div class="btn-group">
@@ -1015,6 +1016,47 @@ function buildSensorDatasets(data, isMonth) {
           data: allPts.map(p => ({ x: p.x, y: p.y > 0 ? p.y : null })),
           borderColor: '#e74c3c', borderWidth: 1.5, pointRadius: 0, tension: 0 });
         datasets.push({ label: 'Degrees cooler inside', backgroundColor: 'transparent',
+          data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? p.y : null })),
+          borderColor: '#2980b9', borderWidth: 1.5, pointRadius: 0, tension: 0 });
+      }
+    }
+  }
+
+  // Shade/sun differential — outside-sun minus outside-shade
+  if (activeModes.has('sun-shade-diff')) {
+    const shadeLbl = allLabels.find(l => l.toLowerCase().replace(/[_\s]/g,'-') === 'outside-shade');
+    const sunLbl   = allLabels.find(l => l.toLowerCase().replace(/[_\s]/g,'-') === 'outside-sun');
+    if (shadeLbl && sunLbl) {
+      if (isMonth) {
+        const years = [...new Set(data.map(r => r.year).filter(Boolean))].sort();
+        years.forEach((year, yi) => {
+          const shadeMap = {}, sunMap = {};
+          data.filter(r => r.label === shadeLbl && r.year === year).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+          data.filter(r => r.label === sunLbl   && r.year === year).forEach(r => { sunMap[r.ts]   = r.temp_f; });
+          const allPts = Object.keys(sunMap)
+            .filter(ts => shadeMap[ts] != null)
+            .map(ts => ({ x: new Date(ts), y: sunMap[ts] - shadeMap[ts] }))
+            .sort((a,b) => a.x - b.x);
+          const dash = yi > 0 ? [4,3] : [];
+          datasets.push({ label: `Degrees warmer in sun ${year}`, backgroundColor: 'transparent',
+            data: allPts.map(p => ({ x: p.x, y: p.y > 0 ? p.y : null })),
+            borderColor: '#e74c3c', borderWidth: 1.5, pointRadius: 0, tension: 0, borderDash: dash });
+          datasets.push({ label: `Degrees cooler in sun ${year}`, backgroundColor: 'transparent',
+            data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? p.y : null })),
+            borderColor: '#2980b9', borderWidth: 1.5, pointRadius: 0, tension: 0, borderDash: dash });
+        });
+      } else {
+        const shadeMap = {}, sunMap = {};
+        data.filter(r => r.label === shadeLbl && r.temp_f != null).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+        data.filter(r => r.label === sunLbl   && r.temp_f != null).forEach(r => { sunMap[r.ts]   = r.temp_f; });
+        const allPts = Object.keys(sunMap)
+          .filter(ts => shadeMap[ts] != null)
+          .map(ts => ({ x: new Date(ts), y: sunMap[ts] - shadeMap[ts] }))
+          .sort((a,b) => a.x - b.x);
+        datasets.push({ label: 'Degrees warmer in sun', backgroundColor: 'transparent',
+          data: allPts.map(p => ({ x: p.x, y: p.y > 0 ? p.y : null })),
+          borderColor: '#e74c3c', borderWidth: 1.5, pointRadius: 0, tension: 0 });
+        datasets.push({ label: 'Degrees cooler in sun', backgroundColor: 'transparent',
           data: allPts.map(p => ({ x: p.x, y: p.y < 0 ? p.y : null })),
           borderColor: '#2980b9', borderWidth: 1.5, pointRadius: 0, tension: 0 });
       }
