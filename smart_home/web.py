@@ -1071,11 +1071,30 @@ function setMonth(m) {
   loadChart();
 }
 
+// Custom interaction mode: find the nearest point by x-pixel for each dataset
+// independently, so tooltip stays synchronized on time-series with unequal lengths.
+Chart.Interaction.modes.nearestXPerDataset = function(chart, e, options, useFinalPosition) {
+  const pos = Chart.helpers.getRelativePosition(e, chart);
+  const items = [];
+  chart.data.datasets.forEach((_, datasetIndex) => {
+    if (!chart.isDatasetVisible(datasetIndex)) return;
+    const meta = chart.getDatasetMeta(datasetIndex);
+    let nearest = null, nearestDist = Infinity;
+    meta.data.forEach((element, index) => {
+      const { x } = element.getProps(['x'], useFinalPosition);
+      const dist = Math.abs(x - pos.x);
+      if (dist < nearestDist) { nearestDist = dist; nearest = { element, datasetIndex, index }; }
+    });
+    if (nearest) items.push(nearest);
+  });
+  return items;
+};
+
 const chart = new Chart(document.getElementById("chart"), {
   type: "line", data: { datasets: [] },
   options: {
     animation: false, parsing: false,
-    interaction: { mode: "index", intersect: false },
+    interaction: { mode: "nearestXPerDataset", intersect: false },
     plugins: { legend: { labels: { color: "#4a6080" } } },
     scales: {
       x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" }, ticks: { color: "#7a90a8", maxTicksLimit: 25 }, grid: { color: "#e8eef4" } },
