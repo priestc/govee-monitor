@@ -922,8 +922,9 @@ function splitDiff(allPts, crossings) {
   const warmer = [], cooler = [];
   for (const p of pts) {
     if (p._crossing) {
+      // Only mark the warmer entry as parity so the tooltip shows once, not twice
       warmer.push({ x: p.x, y: 0, _parity: true, _parityTemp: p._parityTemp });
-      cooler.push({ x: p.x, y: 0, _parity: true, _parityTemp: p._parityTemp });
+      cooler.push({ x: p.x, y: 0, _parityHidden: true });
       continue;
     }
     // Number of crossings at or before this point determines which side we're on
@@ -1203,6 +1204,7 @@ const chart = new Chart(document.getElementById("chart"), {
           label: function(ctx) {
             const raw = ctx.raw;
             if (!raw) return null;
+            if (raw._parityHidden) return null;
             if (raw._parity) {
               const temp = raw._parityTemp != null ? raw._parityTemp.toFixed(1) + "\\u00b0F" : "";
               return "\\u2696\\ufe0f Parity" + (temp ? ": " + temp : "");
@@ -1216,7 +1218,10 @@ const chart = new Chart(document.getElementById("chart"), {
             return { borderColor: ctx.dataset.borderColor, backgroundColor: ctx.dataset.borderColor };
           },
           labelTextColor: function(ctx) {
-            return (ctx.raw && ctx.raw._parity) ? "#8e44ad" : "#1a2535";
+            return (ctx.raw && ctx.raw._parity) ? "#8e44ad" : undefined;
+          },
+          labelFont: function(ctx) {
+            if (ctx.raw && ctx.raw._parity) return { weight: "bold" };
           }
         }
       }
