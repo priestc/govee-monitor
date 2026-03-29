@@ -896,6 +896,18 @@ def monitor(duration, verbose, db, no_db):
         last_seen[reading.address] = now
         if reading.address in sensor_offline_alerted:
             sensor_offline_alerted.discard(reading.address)
+            if conn and db_label:
+                ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
+                    (ts_str, "sensor_online", None, db_label),
+                )
+                conn.commit()
+                _push.send_notification(
+                    title="Sensor Online",
+                    body=f"{db_label} is back online",
+                )
+                click.echo(f"[{ts}] Sensor back online: {db_label}")
         if db_label:
             latest_reading[reading.address] = reading
             if reading.temp_f is not None:
