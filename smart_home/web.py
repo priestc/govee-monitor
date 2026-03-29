@@ -2276,6 +2276,7 @@ def events_api():
     limit = min(int(request.args.get("limit", 50)), 200)
     start = request.args.get("start", "").replace("T", " ") or None
     end   = request.args.get("end",   "").replace("T", " ") or None
+    event_type = request.args.get("event_type", "").strip() or None
     with _conn() as conn:
         query = "SELECT id, ts, event_type, value, details FROM temperature_events"
         params: list = []
@@ -2286,6 +2287,9 @@ def events_api():
         if end:
             clauses.append("ts <= ?")
             params.append(end)
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY ts DESC LIMIT ?"
@@ -2300,6 +2304,7 @@ def events_page():
     EVENT_LABELS = {
         "sun_shade_parity": "Sun / Shade Parity",
         "inside_outside_parity": "Inside / Outside Parity",
+        "sensor_offline": "Sensor Offline",
     }
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -2319,6 +2324,7 @@ def events_page():
     .badge { display: inline-block; padding: .2rem .55rem; border-radius: 20px; font-size: .72rem; font-weight: 600; letter-spacing: .03em; }
     .badge-sun  { background: #fff3e0; color: #d4760a; }
     .badge-io   { background: #e8f4fd; color: #1a6db5; }
+    .badge-off  { background: #fde8e8; color: #c0392b; }
     .val  { font-weight: 700; color: #e07820; }
     .det  { color: #7a90a8; font-size: .8rem; margin-top: .15rem; }
     .empty { text-align: center; color: #aabbc8; padding: 3rem 1rem; font-size: .9rem; }
@@ -2341,7 +2347,7 @@ async function load() {
   }
   tbody.innerHTML = data.map(e => {
     const label = EVENT_LABELS[e.event_type] || e.event_type;
-    const badgeClass = e.event_type === "sun_shade_parity" ? "badge-sun" : "badge-io";
+    const badgeClass = e.event_type === "sun_shade_parity" ? "badge-sun" : e.event_type === "sensor_offline" ? "badge-off" : "badge-io";
     const ts = e.ts.replace(" ", "T");
     const timeStr = new Date(ts).toLocaleString();
     const val = e.value != null ? `${e.value.toFixed(1)}&deg;F` : "&mdash;";
@@ -2387,6 +2393,10 @@ def index():
     .presence-info .name { font-size: .85rem; font-weight: 600; color: #1a2535; }
     .presence-info .status { font-size: .75rem; color: #7a90a8; margin-top: .15rem; }
     .section-title { font-size: .75rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-bottom: .75rem; }
+    .sensor-events { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 2rem; }
+    .sensor-event { background: #fff; border-radius: 10px; padding: .75rem 1.2rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); display: flex; align-items: center; gap: 1rem; border-left: 4px solid #c0392b; }
+    .sensor-event .se-label { font-weight: 600; font-size: .9rem; color: #1a2535; }
+    .sensor-event .se-time  { font-size: .78rem; color: #7a90a8; margin-left: auto; }
     .chart-links { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
     .chart-link { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; background: #fff; border-radius: 12px; padding: 1rem 1.5rem; min-width: 220px; text-decoration: none; color: #1a2535; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); transition: box-shadow .15s, transform .15s; }
     .chart-link:hover { box-shadow: 0 2px 8px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.08); transform: translateY(-1px); }
@@ -2399,6 +2409,11 @@ def index():
 
   <div class="cards" id="cards"></div>
   <div class="presence-cards" id="presence-cards"></div>
+
+  <div id="sensor-events-wrap" style="display:none">
+    <div class="section-title">Sensor Events</div>
+    <div class="sensor-events" id="sensor-events"></div>
+  </div>
 
   <div class="section-title">Charts</div>
   <div class="chart-links">
@@ -2443,10 +2458,27 @@ function timeSince(date) {
   if (s < 86400) return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m ago`;
   return `${Math.floor(s/86400)}d ago`;
 }
+async function loadSensorEvents() {
+  const data = await fetch("/api/events?event_type=sensor_offline&limit=10").then(r => r.json());
+  const wrap = document.getElementById("sensor-events-wrap");
+  const el = document.getElementById("sensor-events");
+  if (!data.length) { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  el.innerHTML = data.map(e => {
+    const timeStr = new Date(e.ts.replace(" ", "T")).toLocaleString();
+    return `<div class="sensor-event">
+      <span style="font-size:1.1rem">&#128683;</span>
+      <span class="se-label">${e.details || e.event_type}</span>
+      <span class="se-time">${timeStr}</span>
+    </div>`;
+  }).join("");
+}
 loadCurrent();
 loadPresence();
+loadSensorEvents();
 setInterval(loadCurrent, 30000);
 setInterval(loadPresence, 30000);
+setInterval(loadSensorEvents, 60000);
 </script>
 </body>
 </html>"""

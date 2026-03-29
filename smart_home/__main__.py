@@ -681,6 +681,7 @@ def monitor(duration, verbose, db, no_db):
     seen: set[str] = set()
     last_seen: dict[str, datetime.datetime] = {}   # address -> last advertisement received
     last_no_reading: dict[str, datetime.datetime] = {}  # address -> last no_reading insert
+    sensor_offline_alerted: set[str] = set()  # addresses for which offline alert was sent this episode
     MISSING_THRESHOLD = datetime.timedelta(minutes=10)
 
     # Xiaomi devices — polled actively via GATT on each advertisement (with cooldown).
@@ -833,6 +834,20 @@ def monitor(duration, verbose, db, no_db):
                         last_no_reading[addr] = now
                         ts = now.strftime("%H:%M:%S")
                         click.echo(f"[{ts}] No reading: {label} ({addr})")
+                    if addr not in sensor_offline_alerted:
+                        sensor_offline_alerted.add(addr)
+                        ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                        conn.execute(
+                            "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
+                            (ts_str, "sensor_offline", None, label),
+                        )
+                        conn.commit()
+                        _push.send_notification(
+                            title="Sensor Offline",
+                            body=f"{label} has stopped responding",
+                        )
+                        ts = now.strftime("%H:%M:%S")
+                        click.echo(f"[{ts}] Sensor offline: {label}")
 
     async def _poll_xiaomi(addr: str) -> None:
         """Poll one Xiaomi sensor immediately after it has been seen advertising.
@@ -879,6 +894,8 @@ def monitor(duration, verbose, db, no_db):
         seen.add(reading.address)
         now = datetime.datetime.now()
         last_seen[reading.address] = now
+        if reading.address in sensor_offline_alerted:
+            sensor_offline_alerted.discard(reading.address)
         if db_label:
             latest_reading[reading.address] = reading
             if reading.temp_f is not None:
