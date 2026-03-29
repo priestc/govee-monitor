@@ -951,13 +951,13 @@ function buildSensorDatasets(data, events, isMonth) {
         });
       } else {
         const shadeMap = {};
-        data.filter(r => r.label === shadeLbl && r.temp_f != null).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+        data.filter(r => r.label === shadeLbl).forEach(r => { shadeMap[r.ts] = r.temp_f; });
         const indoorMap = {};
         data.filter(r => indoorLabels.includes(r.label) && r.temp_f != null)
           .forEach(r => { (indoorMap[r.ts] ??= []).push(r.temp_f); });
-        const allPts = Object.entries(indoorMap)
-          .filter(([ts]) => shadeMap[ts] != null)
-          .map(([ts, vals]) => ({ x: new Date(ts), y: vals.reduce((a,b)=>a+b,0)/vals.length - shadeMap[ts] }))
+        const allTs = new Set([...Object.keys(indoorMap), ...Object.keys(shadeMap)]);
+        const allPts = [...allTs]
+          .map(ts => { const sv = shadeMap[ts], iv = indoorMap[ts]; return { x: new Date(ts), y: (sv != null && iv) ? iv.reduce((a,b)=>a+b,0)/iv.length - sv : null }; })
           .sort((a,b) => a.x - b.x);
         const ioCrossings = events.filter(e => e.event_type === 'inside_outside_parity');
         const { warmer, cooler } = splitDiff(allPts, ioCrossings);
@@ -991,11 +991,11 @@ function buildSensorDatasets(data, events, isMonth) {
         });
       } else {
         const shadeMap = {}, sunMap = {};
-        data.filter(r => r.label === shadeLbl && r.temp_f != null).forEach(r => { shadeMap[r.ts] = r.temp_f; });
-        data.filter(r => r.label === sunLbl   && r.temp_f != null).forEach(r => { sunMap[r.ts]   = r.temp_f; });
-        const allPts = Object.keys(sunMap)
-          .filter(ts => shadeMap[ts] != null)
-          .map(ts => ({ x: new Date(ts), y: sunMap[ts] - shadeMap[ts] }))
+        data.filter(r => r.label === shadeLbl).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+        data.filter(r => r.label === sunLbl  ).forEach(r => { sunMap[r.ts]   = r.temp_f; });
+        const allTs = new Set([...Object.keys(sunMap), ...Object.keys(shadeMap)]);
+        const allPts = [...allTs]
+          .map(ts => ({ x: new Date(ts), y: (sunMap[ts] != null && shadeMap[ts] != null) ? sunMap[ts] - shadeMap[ts] : null }))
           .sort((a,b) => a.x - b.x);
         const ssCrossings = events.filter(e => e.event_type === 'sun_shade_parity');
         const { warmer, cooler } = splitDiff(allPts, ssCrossings);
@@ -1451,13 +1451,13 @@ function buildSensorDatasets(data, events, isMonth) {
         });
       } else {
         const shadeMap = {};
-        data.filter(r => r.label === shadeLbl && r.temp_f != null).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+        data.filter(r => r.label === shadeLbl).forEach(r => { shadeMap[r.ts] = r.temp_f; });
         const indoorMap = {};
         data.filter(r => indoorLabels.includes(r.label) && r.temp_f != null)
           .forEach(r => { (indoorMap[r.ts] ??= []).push(r.temp_f); });
-        const allPts = Object.entries(indoorMap)
-          .filter(([ts]) => shadeMap[ts] != null)
-          .map(([ts, vals]) => ({ x: new Date(ts), y: vals.reduce((a,b)=>a+b,0)/vals.length - shadeMap[ts] }))
+        const allTs = new Set([...Object.keys(indoorMap), ...Object.keys(shadeMap)]);
+        const allPts = [...allTs]
+          .map(ts => { const sv = shadeMap[ts], iv = indoorMap[ts]; return { x: new Date(ts), y: (sv != null && iv) ? iv.reduce((a,b)=>a+b,0)/iv.length - sv : null }; })
           .sort((a,b) => a.x - b.x);
         const ioCrossings = events.filter(e => e.event_type === 'inside_outside_parity');
         const { warmer, cooler } = splitDiff(allPts, ioCrossings);
@@ -1493,11 +1493,11 @@ function buildSensorDatasets(data, events, isMonth) {
         });
       } else {
         const shadeMap = {}, sunMap = {};
-        data.filter(r => r.label === shadeLbl && r.temp_f != null).forEach(r => { shadeMap[r.ts] = r.temp_f; });
-        data.filter(r => r.label === sunLbl   && r.temp_f != null).forEach(r => { sunMap[r.ts]   = r.temp_f; });
-        const allPts = Object.keys(sunMap)
-          .filter(ts => shadeMap[ts] != null)
-          .map(ts => ({ x: new Date(ts), y: sunMap[ts] - shadeMap[ts] }))
+        data.filter(r => r.label === shadeLbl).forEach(r => { shadeMap[r.ts] = r.temp_f; });
+        data.filter(r => r.label === sunLbl  ).forEach(r => { sunMap[r.ts]   = r.temp_f; });
+        const allTs = new Set([...Object.keys(sunMap), ...Object.keys(shadeMap)]);
+        const allPts = [...allTs]
+          .map(ts => ({ x: new Date(ts), y: (sunMap[ts] != null && shadeMap[ts] != null) ? sunMap[ts] - shadeMap[ts] : null }))
           .sort((a,b) => a.x - b.x);
         const ssCrossings = events.filter(e => e.event_type === 'sun_shade_parity');
         const { warmer, cooler } = splitDiff(allPts, ssCrossings);
