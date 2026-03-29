@@ -816,39 +816,6 @@ def monitor(duration, verbose, db, no_db):
             body=f"{label} hit a new all-time record {kind} of {temp:.1f}°F",
         )
 
-    async def check_missing_sensors():
-        while True:
-            await asyncio.sleep(300)  # check every 5 minutes
-            if not conn:
-                continue
-            now = datetime.datetime.now()
-            for addr, label in label_map.items():
-                if not label:
-                    continue
-                last = last_seen.get(addr)
-                if last is None:
-                    continue  # never seen this session, skip
-                if (now - last) >= MISSING_THRESHOLD:
-                    last_nr = last_no_reading.get(addr, datetime.datetime.min)
-                    if (now - last_nr) >= MISSING_THRESHOLD:
-                        insert_no_reading(conn, label, addr)
-                        last_no_reading[addr] = now
-                        ts = now.strftime("%H:%M:%S")
-                        click.echo(f"[{ts}] No reading: {label} ({addr})")
-                    if addr not in sensor_offline_alerted:
-                        sensor_offline_alerted.add(addr)
-                        ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                        conn.execute(
-                            "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
-                            (ts_str, "sensor_offline", None, label),
-                        )
-                        conn.commit()
-                        _push.send_notification(
-                            title="Sensor Offline",
-                            body=f"{label} has stopped responding",
-                        )
-                        ts = now.strftime("%H:%M:%S")
-                        click.echo(f"[{ts}] Sensor offline: {label}")
 
     async def _poll_xiaomi(addr: str) -> None:
         """Poll one Xiaomi sensor immediately after it has been seen advertising.
@@ -895,61 +862,12 @@ def monitor(duration, verbose, db, no_db):
         seen.add(reading.address)
         now = datetime.datetime.now()
         last_seen[reading.address] = now
-        if reading.address in sensor_offline_alerted:
-            sensor_offline_alerted.discard(reading.address)
-            if conn and db_label:
-                ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                # Look up when the sensor went offline to compute duration
-                offline_row = conn.execute(
-                    "SELECT ts FROM temperature_events WHERE event_type='sensor_offline' AND details=? ORDER BY ts DESC LIMIT 1",
-                    (db_label,),
-                ).fetchone()
-                if offline_row:
-                    offline_dt = datetime.datetime.strptime(offline_row[0], "%Y-%m-%d %H:%M:%S")
-                    secs = int((now - offline_dt).total_seconds())
-                    mins, s = divmod(secs, 60)
-                    hrs, m = divmod(mins, 60)
-                    if hrs:
-                        duration = f"{hrs}h {m}m"
-                    else:
-                        duration = f"{m}m"
-                    details = f"{db_label} — offline for {duration}"
-                else:
-                    details = db_label
-                conn.execute(
-                    "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
-                    (ts_str, "sensor_online", None, details),
-                )
-                conn.commit()
-                _push.send_notification(
-                    title="Sensor Online",
-                    body=f"{db_label} is back online",
-                )
-                click.echo(f"[{ts}] Sensor back online: {db_label}")
         if db_label:
             latest_reading[reading.address] = reading
             if reading.temp_f is not None:
                 high_res_buffer.setdefault(db_label, []).append(
                     (now.timestamp(), reading.temp_f)
                 )
-            # Battery low alert
-            if reading.battery is not None:
-                if reading.battery < 20 and db_label not in battery_low_alerted:
-                    battery_low_alerted.add(db_label)
-                    if conn:
-                        ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                        conn.execute(
-                            "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
-                            (ts_str, "battery_low", reading.battery, f"{db_label} battery at {reading.battery}%"),
-                        )
-                        conn.commit()
-                    _push.send_notification(
-                        title="Battery Low",
-                        body=f"{db_label} battery is at {reading.battery}%",
-                    )
-                    click.echo(f"[{ts}] Battery low: {db_label} at {reading.battery}%")
-                elif reading.battery >= 30 and db_label in battery_low_alerted:
-                    battery_low_alerted.discard(db_label)
 
     async def snapshot_loop():
         """Once per minute, write the latest reading for every sensor to the DB
@@ -971,6 +889,62 @@ def monitor(duration, verbose, db, no_db):
                         "INSERT OR IGNORE INTO readings (ts, address, label, temp_f, humidity) VALUES (?,?,?,NULL,NULL)",
                         (ts, addr, label),
                     )
+            # Evaluate sensor events for every labeled sensor
+            now_dt = datetime.datetime.now()
+            log_ts = now_dt.strftime("%H:%M:%S")
+            for addr, label in label_map.items():
+                if not label:
+                    continue
+                last = last_seen.get(addr)
+                recently_seen = last is not None and (now_dt - last).total_seconds() < 70
+
+                if recently_seen:
+                    # Sensor came back online after being offline
+                    if addr in sensor_offline_alerted:
+                        sensor_offline_alerted.discard(addr)
+                        offline_row = conn.execute(
+                            "SELECT ts FROM temperature_events WHERE event_type='sensor_offline' AND details=? ORDER BY ts DESC LIMIT 1",
+                            (label,),
+                        ).fetchone()
+                        if offline_row:
+                            offline_dt = datetime.datetime.strptime(offline_row[0], "%Y-%m-%d %H:%M:%S")
+                            secs = int((now_dt - offline_dt).total_seconds())
+                            hrs, rem = divmod(secs, 3600)
+                            m = rem // 60
+                            duration = f"{hrs}h {m}m" if hrs else f"{m}m"
+                            online_details = f"{label} — offline for {duration}"
+                        else:
+                            online_details = label
+                        conn.execute(
+                            "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
+                            (ts, "sensor_online", None, online_details),
+                        )
+                        _push.send_notification(title="Sensor Online", body=f"{label} is back online")
+                        click.echo(f"[{log_ts}] Sensor back online: {label}")
+                    # Battery check
+                    reading = latest_reading.get(addr)
+                    if reading and reading.battery is not None:
+                        if reading.battery < 20 and label not in battery_low_alerted:
+                            battery_low_alerted.add(label)
+                            conn.execute(
+                                "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
+                                (ts, "battery_low", reading.battery, f"{label} battery at {reading.battery}%"),
+                            )
+                            _push.send_notification(title="Battery Low", body=f"{label} battery is at {reading.battery}%")
+                            click.echo(f"[{log_ts}] Battery low: {label} at {reading.battery}%")
+                        elif reading.battery >= 30:
+                            battery_low_alerted.discard(label)
+                else:
+                    # Sensor offline — fire once per offline episode
+                    if last is not None and addr not in sensor_offline_alerted:
+                        sensor_offline_alerted.add(addr)
+                        conn.execute(
+                            "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
+                            (ts, "sensor_offline", None, label),
+                        )
+                        _push.send_notification(title="Sensor Offline", body=f"{label} has stopped responding")
+                        click.echo(f"[{log_ts}] Sensor offline: {label}")
+
             conn.commit()
             n = len(latest_reading)
             click.echo(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Snapshot written: {n} sensor(s) at {ts}")
@@ -1061,7 +1035,7 @@ def monitor(duration, verbose, db, no_db):
 
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
-        extra = [check_missing_sensors(), snapshot_loop(), check_events_loop()]
+        extra = [snapshot_loop(), check_events_loop()]
         if presence_devices:
             extra.append(check_presence())
         if ecobee_cfg:
