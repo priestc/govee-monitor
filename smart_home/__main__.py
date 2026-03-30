@@ -935,15 +935,16 @@ def monitor(duration, verbose, db, no_db):
                         elif reading.battery >= 30:
                             battery_low_alerted.discard(label)
                 else:
-                    # Sensor offline — fire once per offline episode
+                    # Sensor offline — fire once per episode, but only after 5 minutes missing
                     if last is not None and addr not in sensor_offline_alerted:
-                        sensor_offline_alerted.add(addr)
-                        conn.execute(
-                            "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
-                            (ts, "sensor_offline", None, label),
-                        )
-                        _push.send_notification(title="Sensor Offline", body=f"{label} has stopped responding")
-                        click.echo(f"[{log_ts}] Sensor offline: {label}")
+                        if (now_dt - last).total_seconds() >= 300:
+                            sensor_offline_alerted.add(addr)
+                            conn.execute(
+                                "INSERT OR IGNORE INTO temperature_events (ts, event_type, value, details) VALUES (?,?,?,?)",
+                                (ts, "sensor_offline", None, label),
+                            )
+                            _push.send_notification(title="Sensor Offline", body=f"{label} has stopped responding")
+                            click.echo(f"[{log_ts}] Sensor offline: {label}")
 
             conn.commit()
             n = len(latest_reading)
