@@ -1104,14 +1104,42 @@ def scan_once(timeout, verbose):
 
 
 @main.command("gatt-dump")
-@click.argument("address")
-def gatt_dump(address):
-    """Connect to ADDRESS and dump all GATT services and readable characteristic values.
+@click.argument("sensor", required=False)
+@click.option("--mac-address", "-m", default=None, help="Connect by MAC address directly.")
+def gatt_dump(sensor, mac_address):
+    """Dump all GATT services for a sensor.
 
-    Use this to find where battery info is stored. Example:\n
-      govee-monitor gatt-dump A4:C1:38:C7:6E:35
+    SENSOR can be a label name (e.g. 'outside-sun') or a MAC address.
+    Use --mac-address to force MAC address lookup.\n
+    Examples:\n
+      smart-home gatt-dump outside-sun\n
+      smart-home gatt-dump --mac-address A4:C1:38:F6:DD:80
     """
-    click.echo(f"Connecting to {address}...")
+    if mac_address:
+        address = mac_address
+    elif sensor:
+        label_map = _labels.load()
+        # Check if it looks like a MAC address
+        if len(sensor) == 17 and sensor.count(":") == 5:
+            address = sensor
+        else:
+            # Look up by label
+            match = next(
+                (addr for addr, lbl in label_map.items() if lbl.lower() == sensor.lower()),
+                None,
+            )
+            if match is None:
+                click.echo(f"No sensor found with label {sensor!r}.")
+                click.echo("Known labels: " + ", ".join(sorted(label_map.values())))
+                return
+            address = match
+            click.echo(f"Resolved {sensor!r} → {address}")
+    else:
+        click.echo("Provide a sensor label or --mac-address. Known labels:")
+        label_map = _labels.load()
+        for addr, lbl in sorted(label_map.items(), key=lambda x: x[1]):
+            click.echo(f"  {lbl}  ({addr})")
+        return
     asyncio.run(dump_gatt(address))
 
 
