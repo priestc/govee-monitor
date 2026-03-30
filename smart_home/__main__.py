@@ -903,8 +903,8 @@ def monitor(duration, verbose, db, no_db):
         for r in in_window:
             temp_f = round(r["temp_c"] * 9 / 5 + 32, 2)
             cur = db_conn.execute(
-                "INSERT OR IGNORE INTO readings (ts, address, label, temp_f, humidity, battery) VALUES (?,?,?,?,?,?)",
-                (r["ts"], address, label, temp_f, r["humidity"], r["battery"]),
+                "INSERT OR IGNORE INTO readings (ts, address, label, temp_f, humidity) VALUES (?,?,?,?,?)",
+                (r["ts"], address, label, temp_f, r["humidity"]),
             )
             inserted += cur.rowcount
         db_conn.commit()
@@ -1237,8 +1237,8 @@ def pvvx_history(sensor, count, verbose):
     subset = records if count == 0 else records[-count:]
     import datetime as _dt
     prev_ts = None
-    click.echo(f"{'Timestamp':<22}  {'Temp':>7}  {'Hum':>6}  {'Bat':>4}  {'Interval':>10}")
-    click.echo("-" * 60)
+    click.echo(f"{'Timestamp':<22}  {'Temp':>7}  {'Hum':>6}  {'Vbat':>7}  {'Interval':>10}")
+    click.echo("-" * 63)
     for r in subset:
         ts_dt = _dt.datetime.strptime(r["ts"], "%Y-%m-%d %H:%M:%S")
         if prev_ts is not None:
@@ -1247,7 +1247,7 @@ def pvvx_history(sensor, count, verbose):
         else:
             interval = "—"
         temp_f = r["temp_c"] * 9 / 5 + 32
-        click.echo(f"{r['ts']:<22}  {temp_f:>6.1f}F  {r['humidity']:>5.1f}%  {r['battery']:>3}%  {interval:>10}")
+        click.echo(f"{r['ts']:<22}  {temp_f:>6.1f}F  {r['humidity']:>5.1f}%  {r['vbat_mv']:>5}mV  {interval:>10}")
         prev_ts = ts_dt
 
 
