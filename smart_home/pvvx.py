@@ -11,7 +11,9 @@ _PVVX_FILE  = _CONFIG_DIR / "pvvx_devices.json"
 
 _PVVX_CHAR      = "00001f1f-0000-1000-8000-00805f9b34fb"  # PVVX control/history characteristic
 _CMD_SYNC_TIME  = 0x23
-_CMD_GET_MEMO   = 0x33  # request last N history records; second byte = count (max 255)
+_CMD_QUERY      = 0x33  # init/handshake — send [0x33, 0xC8] on connect
+_CMD_GET_MEMO   = 0x35  # stream history — send [0x35, count_lo, count_hi, start_lo, start_hi]
+_MEMO_BLOCK_ID  = 0x35  # block ID in every history notification
 
 
 def load_addresses() -> set[str]:
@@ -53,9 +55,8 @@ async def read_pvvx_history(
             print(f"  [pvvx] {msg}")
 
     address = address.upper()
-    # Raw records collect (vbat_mv, temp_c, humidity, boot_minutes).
-    # Timestamps are reconstructed after all records arrive using relative offsets.
-    raw_records: list[tuple[int, float, float, int]] = []  # (vbat_mv, temp_c, humidity, boot_min)
+    records: list[dict] = []
+    done = asyncio.Event()
     last_activity: list[float] = [0.0]
     raw_bytes_received: list[int] = [0]
 
@@ -63,21 +64,28 @@ async def read_pvvx_history(
         last_activity[0] = time.monotonic()
         raw_bytes_received[0] += len(data)
         _log(f"notification {len(data)} bytes: {data.hex()}")
-        # The first response is a 2-byte echo of the command — skip it.
-        # Records are 14 bytes with the following layout (all little-endian):
-        #   0:    uint8  command echo (0x33)
-        #   1-2:  uint16 battery voltage in mV
-        #   3-4:  int16  temperature * 100 (°C)
-        #   5-6:  uint16 humidity * 100 (%)
-        #   7-8:  uint16 minutes since device boot (increments by recording interval)
-        #   9-13: (other fields, unused)
-        if len(data) < 14 or data[0] != _CMD_GET_MEMO:
+        if len(data) < 2 or data[0] != _MEMO_BLOCK_ID:
+            return  # not a history notification
+        if len(data) < 13:
+            # End-of-memo signal (len < 12 data bytes after block ID)
+            _log("End-of-memo signal received.")
+            done.set()
             return
-        vbat_mv  = struct.unpack_from("<H", data, 1)[0]
-        raw_temp = struct.unpack_from("<h", data, 3)[0]
-        raw_humi = struct.unpack_from("<H", data, 5)[0]
-        boot_min = struct.unpack_from("<H", data, 7)[0]
-        raw_records.append((vbat_mv, raw_temp / 100.0, raw_humi / 100.0, boot_min))
+        # History record layout (all little-endian):
+        #   0:     uint8  block ID (0x35)
+        #   1-2:   uint16 record counter/index
+        #   3-6:   uint32 unix timestamp
+        #   7-8:   int16  temperature * 100 (°C)
+        #   9-10:  uint16 humidity * 100 (%)
+        #   11-12: uint16 battery voltage (mV)
+        unix_ts  = struct.unpack_from("<I", data, 3)[0]
+        raw_temp = struct.unpack_from("<h", data, 7)[0]
+        raw_humi = struct.unpack_from("<H", data, 9)[0]
+        vbat_mv  = struct.unpack_from("<H", data, 11)[0]
+        if unix_ts == 0:
+            return
+        ts_str = datetime.datetime.fromtimestamp(unix_ts).strftime("%Y-%m-%d %H:%M:%S")
+        records.append({"ts": ts_str, "temp_c": raw_temp / 100.0, "humidity": raw_humi / 100.0, "vbat_mv": vbat_mv})
 
     # Scan first so BlueZ caches the device
     device = None
@@ -117,35 +125,27 @@ async def read_pvvx_history(
             # Subscribe to notifications
             _log(f"Subscribing to notifications on {_PVVX_CHAR}")
             await client.start_notify(_PVVX_CHAR, handle_notification)
-            # Request history: [0x33, count] — sensor streams records, ends when idle
-            memo_cmd = bytes([_CMD_GET_MEMO, min(count, 255)])
-            _log(f"Sending GetMemo: {memo_cmd.hex()} (requesting {min(count, 255)} records)")
+            # Init handshake (query current measurements) — required before GetMemo
+            _log(f"Sending init query: {bytes([_CMD_QUERY, 0xC8]).hex()}")
+            await client.write_gatt_char(_PVVX_CHAR, bytes([_CMD_QUERY, 0xC8]), response=False)
+            await asyncio.sleep(0.5)  # wait for init response
+            # GetMemo: [0x35, count_lo, count_hi, start_lo, start_hi]
+            n = min(count, 19632)
+            memo_cmd = bytes([_CMD_GET_MEMO]) + struct.pack("<HH", n, 0)
+            _log(f"Sending GetMemo: {memo_cmd.hex()} (requesting {n} records)")
             await client.write_gatt_char(_PVVX_CHAR, memo_cmd, response=False)
-            # Wait until no new notifications for idle_timeout seconds
+            # Wait for end-of-memo signal, with idle_timeout as fallback
             last_activity[0] = time.monotonic()
-            while True:
-                await asyncio.sleep(0.5)
-                if time.monotonic() - last_activity[0] >= idle_timeout:
-                    break
-            _log(f"Total bytes received: {raw_bytes_received[0]}, raw records: {len(raw_records)}")
+            try:
+                await asyncio.wait_for(done.wait(), timeout=idle_timeout + n * 0.05 + 10)
+            except asyncio.TimeoutError:
+                _log(f"Timeout waiting for end-of-memo (got {len(records)} records so far)")
+            _log(f"Total bytes received: {raw_bytes_received[0]}, records parsed: {len(records)}")
             await client.stop_notify(_PVVX_CHAR)
     except (BleakError, asyncio.TimeoutError, Exception) as e:
         _log(f"Connection/GATT error: {type(e).__name__}: {e}")
         return []
 
-    if not raw_records:
-        return []
-
-    # Reconstruct absolute timestamps from "minutes since device boot".
-    # Records are sent oldest-first; the last record is the most recent (~now).
-    # boot_min increments by 1 per recording interval (1 minute here).
-    newest_boot_min = raw_records[-1][3]
-    query_epoch = time.time()
-    records = []
-    for vbat_mv, temp_c, humidity, boot_min in raw_records:
-        offset_secs = (newest_boot_min - boot_min) * 60
-        ts_str = datetime.datetime.fromtimestamp(query_epoch - offset_secs).strftime("%Y-%m-%d %H:%M:%S")
-        records.append({"ts": ts_str, "temp_c": temp_c, "humidity": humidity, "vbat_mv": vbat_mv})
-
-    _log(f"Reconstructed {len(records)} records, oldest: {records[0]['ts']}, newest: {records[-1]['ts']}")
+    if records:
+        _log(f"Oldest: {records[0]['ts']}, Newest: {records[-1]['ts']}")
     return records
