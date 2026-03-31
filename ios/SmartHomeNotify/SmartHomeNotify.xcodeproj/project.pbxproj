@@ -40,6 +40,7 @@
 		93C7DE032F7B62A9007AF538 /* SmartHomeWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SmartHomeWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		93C7DE052F7B62A9007AF538 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		93C7DE072F7B62A9007AF538 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		93C7DE262F7B636A007AF538 /* SmartHomeWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SmartHomeWidgetExtension.entitlements; sourceTree = "<group>"; };
 		93C896822F67A31D008C2420 /* SmartHomeNotify.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartHomeNotify.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -111,6 +112,7 @@
 		93C896792F67A31D008C2420 = {
 			isa = PBXGroup;
 			children = (
+				93C7DE262F7B636A007AF538 /* SmartHomeWidgetExtension.entitlements */,
 				93C896842F67A31D008C2420 /* SmartHomeNotify */,
 				93C7DE092F7B62A9007AF538 /* SmartHomeWidget */,
 				93C7DE042F7B62A9007AF538 /* Frameworks */,
@@ -262,6 +264,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = SmartHomeWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6V798W6LMZ;
@@ -293,6 +296,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = SmartHomeWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6V798W6LMZ;
