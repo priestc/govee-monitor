@@ -638,16 +638,54 @@ def configure_camera():
     click.echo("\nDone. Define motion zones at: http://<your-server>:5000/camera")
 
 
+@main.command("discover-shelly")
+@click.option("--subnet", default=None, help="Override subnet to scan (e.g. 192.168.0). Default: auto-detect.")
+def discover_shelly(subnet):
+    """Scan the local network for Shelly devices and print their IPs and models."""
+    detected = _garage.local_subnet() if subnet is None else subnet
+    click.echo(f"Scanning {detected}.1-254 for Shelly devices...")
+    found = _garage.discover(detected)
+    if not found:
+        click.echo("No Shelly devices found.")
+        return
+    click.echo(f"Found {len(found)} device(s):\n")
+    for d in found:
+        name  = d.get("name") or d.get("id") or "unknown"
+        model = d.get("app") or d.get("type") or "?"
+        gen   = d.get("gen", "?")
+        mac   = d.get("mac", "?")
+        click.echo(f"  {d['ip']:16s}  {name}  (model: {model}, gen: {gen}, mac: {mac})")
+
+
 @main.command("configure-garage")
 def configure_garage():
     """Add or update a Shelly Gen3 garage door switch.
 
     The Shelly should already be wired to the garage door button terminals.
-    Run this command to register its IP address and test the connection.
+    Runs Shelly discovery automatically to help you find the IP.
     """
     click.echo("\nGarage Door Setup\n")
     name = click.prompt("Name (e.g. 'garage', 'left-bay')").strip()
-    ip   = click.prompt("Shelly IP address").strip()
+
+    click.echo(f"Scanning network for Shelly devices...")
+    found = _garage.discover()
+    if found:
+        click.echo(f"Found {len(found)} Shelly device(s):\n")
+        for i, d in enumerate(found):
+            label = d.get("name") or d.get("id") or "unknown"
+            model = d.get("app") or d.get("type") or "?"
+            click.echo(f"  [{i+1}] {d['ip']:16s}  {label}  ({model})")
+        click.echo(f"  [0] Enter IP manually\n")
+        choice = click.prompt("Select device number (or 0 to type manually)", default=1, type=int)
+        if 1 <= choice <= len(found):
+            ip = found[choice - 1]["ip"]
+            click.echo(f"Using {ip}")
+        else:
+            ip = click.prompt("Shelly IP address").strip()
+    else:
+        click.echo("No Shelly devices found on the network.")
+        ip = click.prompt("Shelly IP address").strip()
+
     pulse = click.prompt("Pulse duration in seconds", default=0.5, type=float)
 
     click.echo(f"Testing connection to http://{ip}/...")
