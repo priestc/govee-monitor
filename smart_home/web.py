@@ -2084,6 +2084,12 @@ _SIGNAL_PAGE = """\
       <button onclick="setMonth(12)">Dec</button>
     </div>
   </div>
+  <div class="btn-group" style="margin-top:8px">
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9em;color:#4a6080">
+      <input type="checkbox" id="chk-mavg" onchange="loadChart()">
+      3 hour moving average
+    </label>
+  </div>
   <div class="chart-wrap"><h2>RSSI (dBm)</h2><canvas id="chart" height="120"></canvas></div>
 <script>
 const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d35400","#8e44ad","#27ae60","#2980b9","#e74c3c","#f39c12"];
@@ -2219,6 +2225,22 @@ async function loadSensors() {
     });
   }
 }
+function movingAvg(pts, windowMs) {
+  // For each point, average all points within windowMs/2 on either side
+  return pts.map((p, i) => {
+    if (p.y == null) return { x: p.x, y: null };
+    const half = windowMs / 2;
+    const tMs = p.x.getTime();
+    let sum = 0, cnt = 0;
+    for (let j = i; j >= 0 && tMs - pts[j].x.getTime() <= half; j--) {
+      if (pts[j].y != null) { sum += pts[j].y; cnt++; }
+    }
+    for (let j = i + 1; j < pts.length && pts[j].x.getTime() - tMs <= half; j++) {
+      if (pts[j].y != null) { sum += pts[j].y; cnt++; }
+    }
+    return { x: p.x, y: cnt ? sum / cnt : null };
+  });
+}
 async function loadChart() {
   let data;
   if (mode === "recent") {
@@ -2245,15 +2267,18 @@ async function loadChart() {
     chart.options.scales.x.max = new Date(2000, 11, 31, 23, 59, 59);
     chart.options.scales.x.time.unit = "month";
   }
+  const useMavg = document.getElementById('chk-mavg').checked;
+  const MAVG_MS = 3 * 60 * 60 * 1000; // 3 hours in ms
   const allLabels = [...new Set(data.map(r => r.label).filter(Boolean))].sort();
   chart.data.datasets = allLabels
     .filter(lbl => activeLabels.has(lbl))
     .map(lbl => {
       const color = colorMap[lbl] || COLORS[0];
-      const pts = data
+      let pts = data
         .filter(r => r.label === lbl)
         .map(r => ({ x: new Date(r.ts), y: r.rssi ?? null }))
         .sort((a, b) => a.x - b.x);
+      if (useMavg) pts = movingAvg(pts, MAVG_MS);
       return { label: lbl, data: pts, borderColor: color, backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0 };
     });
   chart.update();
