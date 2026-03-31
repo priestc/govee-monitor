@@ -848,6 +848,8 @@ def monitor(duration, verbose, db, no_db):
                 "humi_max": None, "humi_min": None,
             }
 
+    # Tracks which hour-of-day the record check last ran; -1 forces a run at startup
+    _last_record_check_hour = -1
 
     async def _poll_xiaomi(addr: str) -> None:
         """Poll one Xiaomi sensor immediately after it has been seen advertising.
@@ -971,6 +973,7 @@ def monitor(duration, verbose, db, no_db):
     async def snapshot_loop():
         """Once per minute, write the latest reading for every sensor to the DB
         using a single shared timestamp so all readings align in the database."""
+        nonlocal _last_record_check_hour
         while True:
             await asyncio.sleep(60)
             if not conn or not latest_reading:
@@ -1054,8 +1057,11 @@ def monitor(duration, verbose, db, no_db):
             n = len(latest_reading)
             click.echo(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Snapshot written: {n} sensor(s) at {ts}")
 
-            # Check for hourly temperature/humidity records
+            # Check for hourly temperature/humidity records — once per hour only
             now_hour = datetime.datetime.now().hour
+            if now_hour == _last_record_check_hour:
+                continue
+            _last_record_check_hour = now_hour
             h_str = f"{now_hour % 12 or 12}{'AM' if now_hour < 12 else 'PM'}"
 
             def _check_record(label_key: str, temp: float | None, humi: float | None) -> None:
