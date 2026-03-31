@@ -32,6 +32,13 @@ def open_db(path: str) -> sqlite3.Connection:
             UNIQUE(ts, event_type)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS process_stats (
+            ts          TEXT PRIMARY KEY,
+            cpu_percent REAL,
+            mem_mb      REAL
+        )
+    """)
     conn.commit()
     return conn
 

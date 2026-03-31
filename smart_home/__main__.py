@@ -788,33 +788,65 @@ def monitor(duration, verbose, db, no_db):
     if presence_devices:
         click.echo(f"Tracking presence for {len(presence_devices)} device(s).")
 
-    # Load all-time per-label records from DB: {label: {"high": float, "low": float}}
-    records: dict[str, dict] = {}
+    # Load hourly records from DB:
+    # {label_key: {hour_of_day: {temp_max, temp_min, humi_max, humi_min}}}
+    # Special keys: "__inside_avg__" and "__in_out_diff__"
+    hourly_records: dict[str, dict[int, dict]] = {}
     if conn:
-        rows = conn.execute(
-            "SELECT label, MAX(temp_f), MIN(temp_f) FROM readings WHERE temp_f IS NOT NULL AND label IS NOT NULL GROUP BY label"
-        ).fetchall()
-        for label, hi, lo in rows:
-            records[label] = {"high": hi, "low": lo}
+        rows = conn.execute("""
+            SELECT label,
+                   CAST(strftime('%H', ts) AS INTEGER) as hour,
+                   MAX(temp_f), MIN(temp_f),
+                   MAX(humidity), MIN(humidity)
+            FROM readings
+            WHERE label IS NOT NULL AND temp_f IS NOT NULL
+            GROUP BY label, hour
+        """).fetchall()
+        for lbl, hour, mx_t, mn_t, mx_h, mn_h in rows:
+            hourly_records.setdefault(lbl, {})[hour] = {
+                "temp_max": mx_t, "temp_min": mn_t,
+                "humi_max": mx_h, "humi_min": mn_h,
+            }
 
-    _last_record_notify: datetime.datetime = datetime.datetime.min
-    RECORD_NOTIFY_COOLDOWN = datetime.timedelta(hours=1)
+        inside_avg_rows = conn.execute("""
+            SELECT CAST(strftime('%H', ts) AS INTEGER) as hour,
+                   MAX(avg_t), MIN(avg_t), MAX(avg_h), MIN(avg_h)
+            FROM (
+                SELECT ts, AVG(temp_f) as avg_t, AVG(humidity) as avg_h
+                FROM readings
+                WHERE label LIKE '%inside%' AND temp_f IS NOT NULL
+                GROUP BY ts
+            )
+            GROUP BY hour
+        """).fetchall()
+        for hour, mx_t, mn_t, mx_h, mn_h in inside_avg_rows:
+            hourly_records.setdefault("__inside_avg__", {})[hour] = {
+                "temp_max": mx_t, "temp_min": mn_t,
+                "humi_max": mx_h, "humi_min": mn_h,
+            }
 
-    async def _notify_record(kind: str, label: str, temp: float) -> None:
-        nonlocal _last_record_notify
-        now = datetime.datetime.now()
-        if kind == "low" and now.hour < 8:
-            # Sleep until 8 AM today
-            target = now.replace(hour=8, minute=0, second=0, microsecond=0)
-            await asyncio.sleep((target - now).total_seconds())
-            now = datetime.datetime.now()
-        if (now - _last_record_notify) < RECORD_NOTIFY_COOLDOWN:
-            return
-        _last_record_notify = now
-        _push.send_notification(
-            title=f"New record {kind}: {label}",
-            body=f"{label} hit a new all-time record {kind} of {temp:.1f}°F",
-        )
+        diff_rows = conn.execute("""
+            SELECT CAST(strftime('%H', i.ts) AS INTEGER) as hour,
+                   MAX(i.avg_t - o.avg_t), MIN(i.avg_t - o.avg_t)
+            FROM (
+                SELECT ts, AVG(temp_f) as avg_t
+                FROM readings
+                WHERE label LIKE '%inside%' AND temp_f IS NOT NULL
+                GROUP BY ts
+            ) i
+            JOIN (
+                SELECT ts, AVG(temp_f) as avg_t
+                FROM readings
+                WHERE label LIKE '%outside%' AND temp_f IS NOT NULL
+                GROUP BY ts
+            ) o ON i.ts = o.ts
+            GROUP BY hour
+        """).fetchall()
+        for hour, mx_d, mn_d in diff_rows:
+            hourly_records.setdefault("__in_out_diff__", {})[hour] = {
+                "temp_max": mx_d, "temp_min": mn_d,
+                "humi_max": None, "humi_min": None,
+            }
 
 
     async def _poll_xiaomi(addr: str) -> None:
@@ -918,6 +950,24 @@ def monitor(duration, verbose, db, no_db):
         log_ts = datetime.datetime.now().strftime("%H:%M:%S")
         click.echo(f"[{log_ts}] PVVX backfill for {label}: {inserted} rows inserted ({len(in_window)} in window, {len(records)} total)")
 
+    async def process_stats_loop():
+        """Once per minute, record this process's CPU and memory usage."""
+        import psutil
+        proc = psutil.Process()
+        proc.cpu_percent()  # first call establishes baseline; returns 0
+        while True:
+            await asyncio.sleep(60)
+            if not conn:
+                continue
+            ts = datetime.datetime.now().replace(second=0, microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+            cpu = proc.cpu_percent()  # % since last call, non-blocking
+            mem = proc.memory_info().rss / 1024 / 1024
+            conn.execute(
+                "INSERT OR REPLACE INTO process_stats (ts, cpu_percent, mem_mb) VALUES (?,?,?)",
+                (ts, round(cpu, 1), round(mem, 1)),
+            )
+            conn.commit()
+
     async def snapshot_loop():
         """Once per minute, write the latest reading for every sensor to the DB
         using a single shared timestamp so all readings align in the database."""
@@ -1004,30 +1054,79 @@ def monitor(duration, verbose, db, no_db):
             n = len(latest_reading)
             click.echo(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Snapshot written: {n} sensor(s) at {ts}")
 
-        # Check for all-time temperature records (only for explicitly labeled sensors)
-        label = db_label
-        if label and reading.temp_f is not None:
-            if label not in records:
-                # First time seeing this label — initialize without notifying
-                records[label] = {"high": reading.temp_f, "low": reading.temp_f}
-            else:
-                rec = records[label]
-                if reading.temp_f > rec["high"]:
-                    rec["high"] = reading.temp_f
-                    click.echo(f"[{ts}] Record high for {label}: {reading.temp_f:.1f}°F")
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(_notify_record("high", label, reading.temp_f))
-                    except RuntimeError:
-                        pass
-                elif reading.temp_f < rec["low"]:
-                    rec["low"] = reading.temp_f
-                    click.echo(f"[{ts}] Record low for {label}: {reading.temp_f:.1f}°F")
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(_notify_record("low", label, reading.temp_f))
-                    except RuntimeError:
-                        pass
+            # Check for hourly temperature/humidity records
+            now_hour = datetime.datetime.now().hour
+            h_str = f"{now_hour % 12 or 12}{'AM' if now_hour < 12 else 'PM'}"
+
+            def _check_record(label_key: str, temp: float | None, humi: float | None) -> None:
+                display = {
+                    "__inside_avg__": "Inside Average",
+                    "__in_out_diff__": "In/Out Diff",
+                }.get(label_key, label_key)
+                rec = hourly_records.setdefault(label_key, {}).setdefault(now_hour, {
+                    "temp_max": None, "temp_min": None,
+                    "humi_max": None, "humi_min": None,
+                })
+                if temp is not None:
+                    if rec["temp_max"] is None or temp > rec["temp_max"]:
+                        old = rec["temp_max"]
+                        rec["temp_max"] = temp
+                        if old is not None:
+                            _push.send_notification(
+                                title=f"Hourly record: {display}",
+                                body=f"New {h_str} high temp: {temp:.1f}°F (was {old:.1f}°F)",
+                            )
+                            click.echo(f"[{log_ts}] Record {h_str} high temp for {label_key}: {temp:.1f}°F")
+                    if rec["temp_min"] is None or temp < rec["temp_min"]:
+                        old = rec["temp_min"]
+                        rec["temp_min"] = temp
+                        if old is not None:
+                            _push.send_notification(
+                                title=f"Hourly record: {display}",
+                                body=f"New {h_str} low temp: {temp:.1f}°F (was {old:.1f}°F)",
+                            )
+                            click.echo(f"[{log_ts}] Record {h_str} low temp for {label_key}: {temp:.1f}°F")
+                if humi is not None:
+                    if rec["humi_max"] is None or humi > rec["humi_max"]:
+                        old = rec["humi_max"]
+                        rec["humi_max"] = humi
+                        if old is not None:
+                            _push.send_notification(
+                                title=f"Hourly record: {display}",
+                                body=f"New {h_str} high humidity: {humi:.1f}% (was {old:.1f}%)",
+                            )
+                            click.echo(f"[{log_ts}] Record {h_str} high humidity for {label_key}: {humi:.1f}%")
+                    if rec["humi_min"] is None or humi < rec["humi_min"]:
+                        old = rec["humi_min"]
+                        rec["humi_min"] = humi
+                        if old is not None:
+                            _push.send_notification(
+                                title=f"Hourly record: {display}",
+                                body=f"New {h_str} low humidity: {humi:.1f}% (was {old:.1f}%)",
+                            )
+                            click.echo(f"[{log_ts}] Record {h_str} low humidity for {label_key}: {humi:.1f}%")
+
+            for addr, reading in list(latest_reading.items()):
+                lbl = label_map.get(addr)
+                if lbl:
+                    _check_record(lbl, reading.temp_f, reading.humidity)
+
+            inside_temps = [r.temp_f for r in latest_reading.values()
+                            if r.label and "inside" in r.label and r.temp_f is not None]
+            inside_humis = [r.humidity for r in latest_reading.values()
+                            if r.label and "inside" in r.label and r.humidity is not None]
+            if inside_temps:
+                _check_record(
+                    "__inside_avg__",
+                    sum(inside_temps) / len(inside_temps),
+                    sum(inside_humis) / len(inside_humis) if inside_humis else None,
+                )
+
+            outside_temps = [r.temp_f for r in latest_reading.values()
+                             if r.label and "outside" in r.label and r.temp_f is not None]
+            if inside_temps and outside_temps:
+                diff = sum(inside_temps) / len(inside_temps) - sum(outside_temps) / len(outside_temps)
+                _check_record("__in_out_diff__", diff, None)
 
     from smart_home import ecobee as _ecobee
     from smart_home import homeassistant as _ha
@@ -1090,7 +1189,7 @@ def monitor(duration, verbose, db, no_db):
 
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
-        extra = [snapshot_loop(), check_events_loop()]
+        extra = [snapshot_loop(), check_events_loop(), process_stats_loop()]
         if presence_devices:
             extra.append(check_presence())
         if ecobee_cfg:

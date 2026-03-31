@@ -14,6 +14,7 @@ dependencies = [
     "flask-compress>=1.14",
     "httpx[http2]>=0.27",
     "PyJWT[crypto]>=2.0",
+    "psutil>=5.9",
 ]
 
 [project.scripts]

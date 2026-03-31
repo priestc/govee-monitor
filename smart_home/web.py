@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 import sqlite3
 from flask import Flask, jsonify, request, Response
 from flask_compress import Compress
@@ -2453,6 +2454,7 @@ def index():
     <a href="/chart/sensors"     class="chart-link"><span class="cl-title">Sensor Battery Life</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/chart/signal"      class="chart-link"><span class="cl-title">Signal Strength</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/events"            class="chart-link"><span class="cl-title">Temperature Events</span><span class="cl-arrow">&#8594;</span></a>
+    <a href="/process-stats"     class="chart-link"><span class="cl-title">Process Stats</span><span class="cl-arrow">&#8594;</span></a>
   </div>
 
   <div id="events-wrap" style="display:none">
@@ -2527,6 +2529,122 @@ setInterval(loadEvents, 60000);
 </body>
 </html>"""
     return Response(html, mimetype="text/html")
+
+
+@app.get("/api/process-stats")
+def api_process_stats():
+    days = float(request.args.get("days", 1))
+    start = request.args.get("start")
+    end = request.args.get("end")
+    with _conn() as conn:
+        if start and end:
+            rows = conn.execute(
+                "SELECT ts, cpu_percent, mem_mb FROM process_stats WHERE ts >= ? AND ts <= ? ORDER BY ts",
+                (start, end),
+            ).fetchall()
+        else:
+            cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+            rows = conn.execute(
+                "SELECT ts, cpu_percent, mem_mb FROM process_stats WHERE ts >= ? ORDER BY ts",
+                (cutoff,),
+            ).fetchall()
+    return jsonify([{"ts": r[0], "cpu": r[1], "mem": r[2]} for r in rows])
+
+
+_PROCESS_STATS_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Process Stats &mdash; Smart Home</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
+    .nav { margin-bottom: 1.5rem; }
+    .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .chart-wrap { background: #fff; border-radius: 12px; padding: 1.4rem 1.4rem 1rem; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); }
+    .chart-wrap h2 { font-size: 0.85rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 1rem; }
+    .btn-group { margin-bottom: 1.2rem; }
+    .btn-group-label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-bottom: .4rem; }
+    .range-btns { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .range-btns button { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
+    .range-btns button:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .range-btns button.active { background: #e07820; color: #fff; border-color: #e07820; }
+  </style>
+</head>
+<body>
+  <h1>Process Stats</h1>
+  <div class="nav"><a href="/">&larr; Dashboard</a></div>
+  <div class="btn-group">
+    <div class="btn-group-label">Most Recent</div>
+    <div class="range-btns">
+      <button onclick="setRange(0.25)" data-days="0.25">6h</button>
+      <button onclick="setRange(1)"    data-days="1" class="active">24h</button>
+      <button onclick="setRange(7)"    data-days="7">7d</button>
+      <button onclick="setRange(30)"   data-days="30">30d</button>
+    </div>
+  </div>
+  <div class="chart-wrap"><h2>CPU %</h2><canvas id="cpu-chart" height="80"></canvas></div>
+  <div class="chart-wrap"><h2>Memory (MB)</h2><canvas id="mem-chart" height="80"></canvas></div>
+<script>
+let rangeDays = 1;
+
+function makeChart(id, label, color, yLabel) {
+  return new Chart(document.getElementById(id), {
+    type: "line",
+    data: { datasets: [{ label, data: [], borderColor: color, backgroundColor: color + "22",
+                         borderWidth: 1.5, pointRadius: 0, tension: 0, fill: true }] },
+    options: {
+      animation: false, parsing: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.raw.y != null ? ctx.raw.y.toFixed(1) : "—"} ${yLabel}` } } },
+      scales: {
+        x: { type: "time", time: { tooltipFormat: "MMM d, h:mm a" },
+             ticks: { color: "#7a90a8", maxTicksLimit: 20 }, grid: { color: "#e8eef4" } },
+        y: { min: 0, ticks: { color: "#7a90a8", callback: v => v + " " + yLabel }, grid: { color: "#e8eef4" } }
+      }
+    }
+  });
+}
+
+const cpuChart = makeChart("cpu-chart", "CPU %",    "#e07820", "%");
+const memChart = makeChart("mem-chart", "Memory MB", "#2e7dd4", "MB");
+
+function setRange(days) {
+  rangeDays = days;
+  document.querySelectorAll(".range-btns button[data-days]").forEach(b =>
+    b.classList.toggle("active", parseFloat(b.dataset.days) === days));
+  load();
+}
+
+async function load() {
+  const data = await fetch(`/api/process-stats?days=${rangeDays}`).then(r => r.json());
+  const now = new Date();
+  const xMin = new Date(now - rangeDays * 86400000);
+  [cpuChart, memChart].forEach(c => { c.options.scales.x.min = xMin; c.options.scales.x.max = now;
+    c.options.scales.x.time.unit = rangeDays <= 1 ? "hour" : "day"; });
+  cpuChart.data.datasets[0].data = data.map(r => ({ x: new Date(r.ts), y: r.cpu }));
+  memChart.data.datasets[0].data = data.map(r => ({ x: new Date(r.ts), y: r.mem }));
+  cpuChart.update();
+  memChart.update();
+}
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>"""
+
+
+@app.get("/process-stats")
+def process_stats_page():
+    return Response(_PROCESS_STATS_PAGE, mimetype="text/html")
 
 
 def run(db_path: str, host: str, port: int, debug: bool) -> None:

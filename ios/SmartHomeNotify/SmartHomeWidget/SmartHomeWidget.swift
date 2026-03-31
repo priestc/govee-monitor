@@ -4,9 +4,9 @@ import SwiftUI
 // MARK: - Model
 
 struct SensorReading: Codable, Identifiable {
-    var id: String { label ?? address }
+    var id: String { label ?? address ?? UUID().uuidString }
     let label: String?
-    let address: String
+    let address: String?
     let temp_f: Double?
     let humidity: Double?
 }
@@ -17,6 +17,7 @@ struct SmartHomeEntry: TimelineEntry {
     let date: Date
     let sensors: [SensorReading]
     let error: String?
+    let debugURL: String?
 }
 
 // MARK: - Provider
@@ -28,7 +29,7 @@ struct SmartHomeProvider: TimelineProvider {
         SmartHomeEntry(date: Date(), sensors: [
             SensorReading(label: "outside-shade", address: "", temp_f: 72.4, humidity: 45.1),
             SensorReading(label: "inside-office", address: "", temp_f: 75.8, humidity: 36.2),
-        ], error: nil)
+        ], error: nil, debugURL: nil)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (SmartHomeEntry) -> Void) {
@@ -48,17 +49,20 @@ struct SmartHomeProvider: TimelineProvider {
         let tailscaleURL = defaults?.string(forKey: "tailscaleURL") ?? ""
 
         let raw = localURL.isEmpty ? tailscaleURL : localURL
-        guard !raw.isEmpty, let url = URL(string: normalizeURL(raw) + "/api/current") else {
-            completion(SmartHomeEntry(date: Date(), sensors: [], error: "No server URL configured.\nOpen Smart Home and enter your server address."))
+        let urlString = normalizeURL(raw) + "/api/current"
+        guard !raw.isEmpty, let url = URL(string: urlString) else {
+            completion(SmartHomeEntry(date: Date(), sensors: [], error: "No server URL configured.\nOpen Smart Home and enter your server address.", debugURL: "local='\(localURL)' tail='\(tailscaleURL)'"))
             return
         }
 
         let req = URLRequest(url: url, timeoutInterval: 10)
-        URLSession.shared.dataTask(with: req) { data, _, _ in
+        URLSession.shared.dataTask(with: req) { data, response, error in
             if let data, let sensors = try? JSONDecoder().decode([SensorReading].self, from: data) {
-                completion(SmartHomeEntry(date: Date(), sensors: sensors, error: nil))
+                completion(SmartHomeEntry(date: Date(), sensors: sensors, error: nil, debugURL: nil))
             } else {
-                completion(SmartHomeEntry(date: Date(), sensors: [], error: "Could not reach server"))
+                let httpStatus = (response as? HTTPURLResponse).map { "HTTP \($0.statusCode)" } ?? "no response"
+                let errMsg = error?.localizedDescription ?? "decode failed"
+                completion(SmartHomeEntry(date: Date(), sensors: [], error: "Could not reach server", debugURL: "URL: \(urlString)\n\(httpStatus)\n\(errMsg)"))
             }
         }.resume()
     }
@@ -103,6 +107,12 @@ struct SmartHomeWidgetView: View {
                         .font(.system(size: 12))
                         .foregroundColor(.red)
                         .fixedSize(horizontal: false, vertical: true)
+                    if let dbg = entry.debugURL {
+                        Text(dbg)
+                            .font(.system(size: 9))
+                            .foregroundColor(muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Spacer()
                 } else if entry.sensors.isEmpty {
                     Text("No sensors found")
@@ -115,7 +125,7 @@ struct SmartHomeWidgetView: View {
                             divider.frame(height: 1).padding(.vertical, 6)
                         }
                         HStack(alignment: .center) {
-                            Text((sensor.label ?? sensor.address).uppercased())
+                            Text((sensor.label ?? sensor.address ?? "?").uppercased())
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(muted)
                                 .lineLimit(1)
@@ -167,5 +177,5 @@ struct SmartHomeWidget: Widget {
         SensorReading(label: "outside-shade", address: "", temp_f: 72.4, humidity: 45.1),
         SensorReading(label: "outside-sun",   address: "", temp_f: 80.2, humidity: 38.7),
         SensorReading(label: "inside-office", address: "", temp_f: 75.8, humidity: 36.2),
-    ], error: nil)
+    ], error: nil, debugURL: nil)
 }
