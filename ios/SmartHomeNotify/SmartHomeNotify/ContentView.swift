@@ -1,8 +1,12 @@
 import SwiftUI
+import WidgetKit
+
+private let appGroupDefaults = UserDefaults(suiteName: "group.io.github.priestc.SmartHomeNotify")!
 
 struct ContentView: View {
-    @AppStorage("localURL")    private var localURL    = ""
-    @AppStorage("tailscaleURL") private var tailscaleURL = ""
+    // Store URLs in the shared App Group so the widget extension can read them
+    @AppStorage("localURL",     store: appGroupDefaults) private var localURL     = ""
+    @AppStorage("tailscaleURL", store: appGroupDefaults) private var tailscaleURL = ""
     @State private var status: String? = nil
     @State private var isRegistering = false
 
@@ -119,6 +123,7 @@ struct ContentView: View {
             } else {
                 status = "✓ Registered on \(successes.count) of \(candidates.count) URLs (local may be unreachable when away)."
             }
+            WidgetCenter.shared.reloadAllTimelines()
         }
     }
 }
