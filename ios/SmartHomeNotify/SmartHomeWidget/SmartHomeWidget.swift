@@ -53,7 +53,7 @@ struct SmartHomeProvider: TimelineProvider {
             return
         }
 
-        var req = URLRequest(url: url, timeoutInterval: 10)
+        let req = URLRequest(url: url, timeoutInterval: 10)
         URLSession.shared.dataTask(with: req) { data, _, _ in
             if let data, let sensors = try? JSONDecoder().decode([SensorReading].self, from: data) {
                 completion(SmartHomeEntry(date: Date(), sensors: sensors, error: nil))
@@ -87,7 +87,6 @@ struct SmartHomeWidgetView: View {
         ZStack {
             bg.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 0) {
-                // Title row
                 HStack(alignment: .center) {
                     Text("Smart Home")
                         .font(.system(size: 15, weight: .bold))
@@ -151,6 +150,7 @@ struct SmartHomeWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: SmartHomeProvider()) { entry in
             SmartHomeWidgetView(entry: entry)
+                .containerBackground(Color(red: 0.941, green: 0.957, blue: 0.973), for: .widget)
         }
         .configurationDisplayName("Smart Home")
         .description("Current temperature and humidity for all sensors.")

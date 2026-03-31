@@ -6,11 +6,51 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		93C7DE062F7B62A9007AF538 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 93C7DE052F7B62A9007AF538 /* WidgetKit.framework */; };
+		93C7DE082F7B62A9007AF538 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 93C7DE072F7B62A9007AF538 /* SwiftUI.framework */; };
+		93C7DE172F7B62AA007AF538 /* SmartHomeWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 93C7DE032F7B62A9007AF538 /* SmartHomeWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		93C7DE152F7B62AA007AF538 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 93C8967A2F67A31D008C2420 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 93C7DE022F7B62A9007AF538;
+			remoteInfo = SmartHomeWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		93C7DE182F7B62AA007AF538 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				93C7DE172F7B62AA007AF538 /* SmartHomeWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		93C7DE032F7B62A9007AF538 /* SmartHomeWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SmartHomeWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		93C7DE052F7B62A9007AF538 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		93C7DE072F7B62A9007AF538 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		93C896822F67A31D008C2420 /* SmartHomeNotify.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartHomeNotify.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		93C7DE1C2F7B62AA007AF538 /* Exceptions for "SmartHomeWidget" folder in "SmartHomeWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 93C7DE022F7B62A9007AF538 /* SmartHomeWidgetExtension */;
+		};
 		93C8969A2F67B954008C2420 /* Exceptions for "SmartHomeNotify" folder in "SmartHomeNotify" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -21,6 +61,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		93C7DE092F7B62A9007AF538 /* SmartHomeWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				93C7DE1C2F7B62AA007AF538 /* Exceptions for "SmartHomeWidget" folder in "SmartHomeWidgetExtension" target */,
+			);
+			path = SmartHomeWidget;
+			sourceTree = "<group>";
+		};
 		93C896842F67A31D008C2420 /* SmartHomeNotify */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -32,6 +80,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		93C7DE002F7B62A9007AF538 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				93C7DE082F7B62A9007AF538 /* SwiftUI.framework in Frameworks */,
+				93C7DE062F7B62A9007AF538 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		93C8967F2F67A31D008C2420 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -42,10 +99,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		93C7DE042F7B62A9007AF538 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				93C7DE052F7B62A9007AF538 /* WidgetKit.framework */,
+				93C7DE072F7B62A9007AF538 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		93C896792F67A31D008C2420 = {
 			isa = PBXGroup;
 			children = (
 				93C896842F67A31D008C2420 /* SmartHomeNotify */,
+				93C7DE092F7B62A9007AF538 /* SmartHomeWidget */,
+				93C7DE042F7B62A9007AF538 /* Frameworks */,
 				93C896832F67A31D008C2420 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +122,7 @@
 			isa = PBXGroup;
 			children = (
 				93C896822F67A31D008C2420 /* SmartHomeNotify.app */,
+				93C7DE032F7B62A9007AF538 /* SmartHomeWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,6 +130,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		93C7DE022F7B62A9007AF538 /* SmartHomeWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 93C7DE1B2F7B62AA007AF538 /* Build configuration list for PBXNativeTarget "SmartHomeWidgetExtension" */;
+			buildPhases = (
+				93C7DDFF2F7B62A9007AF538 /* Sources */,
+				93C7DE002F7B62A9007AF538 /* Frameworks */,
+				93C7DE012F7B62A9007AF538 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				93C7DE092F7B62A9007AF538 /* SmartHomeWidget */,
+			);
+			name = SmartHomeWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = SmartHomeWidgetExtension;
+			productReference = 93C7DE032F7B62A9007AF538 /* SmartHomeWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		93C896812F67A31D008C2420 /* SmartHomeNotify */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 93C8968D2F67A31E008C2420 /* Build configuration list for PBXNativeTarget "SmartHomeNotify" */;
@@ -68,10 +159,12 @@
 				93C8967E2F67A31D008C2420 /* Sources */,
 				93C8967F2F67A31D008C2420 /* Frameworks */,
 				93C896802F67A31D008C2420 /* Resources */,
+				93C7DE182F7B62AA007AF538 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				93C7DE162F7B62AA007AF538 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				93C896842F67A31D008C2420 /* SmartHomeNotify */,
@@ -90,9 +183,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2620;
+				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					93C7DE022F7B62A9007AF538 = {
+						CreatedOnToolsVersion = 26.4;
+					};
 					93C896812F67A31D008C2420 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -113,11 +209,19 @@
 			projectRoot = "";
 			targets = (
 				93C896812F67A31D008C2420 /* SmartHomeNotify */,
+				93C7DE022F7B62A9007AF538 /* SmartHomeWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		93C7DE012F7B62A9007AF538 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		93C896802F67A31D008C2420 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -128,6 +232,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		93C7DDFF2F7B62A9007AF538 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		93C8967E2F67A31D008C2420 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -137,7 +248,77 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		93C7DE162F7B62AA007AF538 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 93C7DE022F7B62A9007AF538 /* SmartHomeWidgetExtension */;
+			targetProxy = 93C7DE152F7B62AA007AF538 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		93C7DE192F7B62AA007AF538 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6V798W6LMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SmartHomeWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SmartHomeWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.priestc.SmartHomeNotify.SmartHomeWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		93C7DE1A2F7B62AA007AF538 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6V798W6LMZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SmartHomeWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SmartHomeWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.priestc.SmartHomeNotify.SmartHomeWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		93C8968B2F67A31E008C2420 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -330,6 +511,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		93C7DE1B2F7B62AA007AF538 /* Build configuration list for PBXNativeTarget "SmartHomeWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				93C7DE192F7B62AA007AF538 /* Debug */,
+				93C7DE1A2F7B62AA007AF538 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		93C8967D2F67A31D008C2420 /* Build configuration list for PBXProject "SmartHomeNotify" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
