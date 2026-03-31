@@ -2455,6 +2455,7 @@ def index():
     <a href="/chart/signal"      class="chart-link"><span class="cl-title">Signal Strength</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/events"            class="chart-link"><span class="cl-title">Temperature Events</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/process-stats"     class="chart-link"><span class="cl-title">Process Stats</span><span class="cl-arrow">&#8594;</span></a>
+    <a href="/camera"            class="chart-link"><span class="cl-title">Camera Zones</span><span class="cl-arrow">&#8594;</span></a>
   </div>
 
   <div id="events-wrap" style="display:none">
@@ -2645,6 +2646,310 @@ setInterval(load, 60000);
 @app.get("/process-stats")
 def process_stats_page():
     return Response(_PROCESS_STATS_PAGE, mimetype="text/html")
+
+
+# ---------------------------------------------------------------------------
+# Camera motion zones
+# ---------------------------------------------------------------------------
+
+@app.get("/api/camera/snapshot/<name>")
+def api_camera_snapshot(name):
+    from smart_home import camera as _camera
+    cameras = _camera.load_config()
+    cam = next((c for c in cameras if c["name"] == name), None)
+    if cam is None:
+        return ("Camera not found", 404)
+    jpeg = _camera.get_snapshot_jpeg(cam["rtsp_url"])
+    if jpeg is None:
+        return ("Could not grab frame", 502)
+    return Response(jpeg, mimetype="image/jpeg")
+
+
+@app.get("/api/camera/zones/<name>")
+def api_camera_zones_get(name):
+    from smart_home import camera as _camera
+    cameras = _camera.load_config()
+    cam = next((c for c in cameras if c["name"] == name), None)
+    if cam is None:
+        return jsonify([])
+    return jsonify(cam.get("zones", []))
+
+
+@app.post("/api/camera/zones/<name>")
+def api_camera_zones_set(name):
+    from smart_home import camera as _camera
+    zones = request.get_json(silent=True)
+    if not isinstance(zones, list):
+        return ("Expected JSON array", 400)
+    cameras = _camera.load_config()
+    cam = next((c for c in cameras if c["name"] == name), None)
+    if cam is None:
+        return ("Camera not found", 404)
+    cam["zones"] = zones
+    _camera.save_config(cameras)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/cameras")
+def api_cameras():
+    from smart_home import camera as _camera
+    cameras = _camera.load_config()
+    return jsonify([{"name": c["name"], "zones": c.get("zones", [])} for c in cameras])
+
+
+_CAMERA_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Camera Zones &mdash; Smart Home</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
+    .nav { margin-bottom: 1.2rem; }
+    .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .cam-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .cam-tab { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px;
+               padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
+    .cam-tab:hover { background: #f0f4f8; }
+    .cam-tab.active { background: #e07820; color: #fff; border-color: #e07820; }
+    .editor { background: #fff; border-radius: 12px; padding: 1.2rem; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); margin-bottom: 1rem; }
+    .canvas-wrap { position: relative; display: inline-block; max-width: 100%; }
+    canvas { display: block; max-width: 100%; cursor: crosshair; border-radius: 6px; }
+    .controls { margin-top: 1rem; display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+    .btn { padding: .38rem 1.1rem; border-radius: 6px; border: 1px solid #d0dce8; background: #fff;
+           color: #4a6080; font-size: .85rem; font-weight: 500; cursor: pointer; transition: all .15s; }
+    .btn:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .btn.primary { background: #2e7dd4; color: #fff; border-color: #2e7dd4; }
+    .btn.primary:hover { background: #2568b8; }
+    .btn.danger { background: #c0392b; color: #fff; border-color: #c0392b; }
+    .btn.danger:hover { background: #a93226; }
+    .zones-list { margin-top: 1.2rem; }
+    .zone-row { display: flex; align-items: center; gap: .6rem; padding: .5rem .8rem;
+                background: #f8fafc; border-radius: 8px; margin-bottom: .4rem; font-size: .85rem; }
+    .zone-color { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+    .zone-name { flex: 1; font-weight: 600; }
+    .zone-sens { color: #7a90a8; font-size: .78rem; }
+    .sens-label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-right: .3rem; }
+    .hint { font-size: .78rem; color: #7a90a8; margin-top: .5rem; }
+    #status { font-size: .85rem; color: #2a9d6e; margin-top: .5rem; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>Camera Motion Zones</h1>
+  <div class="nav"><a href="/">&larr; Dashboard</a></div>
+  <div class="cam-tabs" id="cam-tabs"></div>
+  <div id="no-cameras" style="display:none;color:#7a90a8;font-size:.9rem;">
+    No cameras configured. Run <code>smart-home configure-camera</code> on the server.
+  </div>
+  <div class="editor" id="editor" style="display:none">
+    <div class="canvas-wrap">
+      <canvas id="canvas"></canvas>
+    </div>
+    <p class="hint">Click and drag on the frame to draw a motion zone. Click an existing zone to select it.</p>
+    <div class="controls">
+      <button class="btn" onclick="refreshFrame()">&#8635; Refresh Frame</button>
+      <button class="btn danger" id="btn-delete" onclick="deleteSelected()" disabled>Delete Zone</button>
+      <span class="sens-label">Sensitivity</span>
+      <input id="sens" type="range" min="1" max="30" value="5" style="width:100px">
+      <span id="sens-val" style="font-size:.82rem;color:#4a6080">5%</span>
+      <button class="btn primary" onclick="saveZones()">Save Zones</button>
+    </div>
+    <div id="status"></div>
+    <div class="zones-list" id="zones-list"></div>
+  </div>
+<script>
+const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d35400","#8e44ad"];
+let cameras = [], activeCam = null;
+let zones = [], selectedIdx = -1;
+let drawing = false, startX = 0, startY = 0, scaleX = 1, scaleY = 1;
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const img = new Image();
+
+img.onload = () => {
+  canvas.width  = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const dw = canvas.parentElement.offsetWidth;
+  scaleX = img.naturalWidth  / Math.min(dw, img.naturalWidth);
+  scaleY = img.naturalHeight / Math.min(dw, img.naturalWidth) * (img.naturalHeight / img.naturalWidth);
+  redraw();
+};
+
+document.getElementById("sens").oninput = function() {
+  document.getElementById("sens-val").textContent = this.value + "%";
+  if (selectedIdx >= 0) {
+    zones[selectedIdx].sensitivity = parseFloat(this.value) / 100;
+    redraw();
+  }
+};
+
+function clientToCanvas(e) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) / r.width,
+    y: (e.clientY - r.top)  / r.height,
+  };
+}
+
+canvas.addEventListener("mousedown", e => {
+  const p = clientToCanvas(e);
+  // Check if clicking existing zone
+  for (let i = zones.length - 1; i >= 0; i--) {
+    const z = zones[i];
+    if (p.x >= z.x && p.x <= z.x + z.width && p.y >= z.y && p.y <= z.y + z.height) {
+      selectedIdx = i;
+      document.getElementById("btn-delete").disabled = false;
+      document.getElementById("sens").value = Math.round((z.sensitivity || 0.05) * 100);
+      document.getElementById("sens-val").textContent = Math.round((z.sensitivity || 0.05) * 100) + "%";
+      redraw();
+      return;
+    }
+  }
+  drawing = true;
+  startX = p.x; startY = p.y;
+  selectedIdx = -1;
+  document.getElementById("btn-delete").disabled = true;
+});
+
+canvas.addEventListener("mousemove", e => {
+  if (!drawing) return;
+  const p = clientToCanvas(e);
+  redraw();
+  const x = Math.min(startX, p.x), y = Math.min(startY, p.y);
+  const w = Math.abs(p.x - startX), h = Math.abs(p.y - startY);
+  ctx.strokeStyle = COLORS[zones.length % COLORS.length];
+  ctx.lineWidth = 2 / canvas.getBoundingClientRect().width * canvas.width;
+  ctx.setLineDash([6, 3]);
+  ctx.strokeRect(x * canvas.width, y * canvas.height, w * canvas.width, h * canvas.height);
+  ctx.setLineDash([]);
+});
+
+canvas.addEventListener("mouseup", e => {
+  if (!drawing) return;
+  drawing = false;
+  const p = clientToCanvas(e);
+  const x = Math.min(startX, p.x), y = Math.min(startY, p.y);
+  const w = Math.abs(p.x - startX), h = Math.abs(p.y - startY);
+  if (w < 0.01 || h < 0.01) return; // too small
+  const name = prompt("Zone name:", `zone-${zones.length + 1}`);
+  if (!name) return;
+  const sens = parseFloat(document.getElementById("sens").value) / 100;
+  zones.push({ name, x, y, width: w, height: h, sensitivity: sens });
+  selectedIdx = zones.length - 1;
+  document.getElementById("btn-delete").disabled = false;
+  renderZoneList();
+  redraw();
+});
+
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0);
+  const lw = 2 / canvas.getBoundingClientRect().width * canvas.width;
+  zones.forEach((z, i) => {
+    const color = COLORS[i % COLORS.length];
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw * (i === selectedIdx ? 2.5 : 1.5);
+    ctx.setLineDash(i === selectedIdx ? [] : []);
+    ctx.strokeRect(z.x * canvas.width, z.y * canvas.height, z.width * canvas.width, z.height * canvas.height);
+    ctx.fillStyle = color + "33";
+    ctx.fillRect(z.x * canvas.width, z.y * canvas.height, z.width * canvas.width, z.height * canvas.height);
+    ctx.fillStyle = color;
+    ctx.font = `bold ${Math.max(12, lw * 6)}px system-ui`;
+    ctx.fillText(z.name, z.x * canvas.width + 4, z.y * canvas.height + Math.max(14, lw * 7));
+  });
+}
+
+function renderZoneList() {
+  document.getElementById("zones-list").innerHTML = zones.map((z, i) => `
+    <div class="zone-row" onclick="selectZone(${i})" style="cursor:pointer;outline:${i===selectedIdx?'2px solid '+COLORS[i%COLORS.length]:'none'}">
+      <span class="zone-color" style="background:${COLORS[i % COLORS.length]}"></span>
+      <span class="zone-name">${z.name}</span>
+      <span class="zone-sens">sensitivity: ${Math.round((z.sensitivity||0.05)*100)}%</span>
+    </div>`).join("");
+}
+
+function selectZone(i) {
+  selectedIdx = i;
+  document.getElementById("btn-delete").disabled = false;
+  document.getElementById("sens").value = Math.round((zones[i].sensitivity || 0.05) * 100);
+  document.getElementById("sens-val").textContent = Math.round((zones[i].sensitivity || 0.05) * 100) + "%";
+  renderZoneList();
+  redraw();
+}
+
+function deleteSelected() {
+  if (selectedIdx < 0) return;
+  zones.splice(selectedIdx, 1);
+  selectedIdx = -1;
+  document.getElementById("btn-delete").disabled = true;
+  renderZoneList();
+  redraw();
+}
+
+async function refreshFrame() {
+  img.src = `/api/camera/snapshot/${encodeURIComponent(activeCam)}?t=${Date.now()}`;
+}
+
+async function loadZones() {
+  const data = await fetch(`/api/camera/zones/${encodeURIComponent(activeCam)}`).then(r => r.json());
+  zones = data;
+  renderZoneList();
+  redraw();
+}
+
+async function saveZones() {
+  const r = await fetch(`/api/camera/zones/${encodeURIComponent(activeCam)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(zones),
+  });
+  const st = document.getElementById("status");
+  if (r.ok) {
+    st.textContent = "✓ Zones saved.";
+    setTimeout(() => st.textContent = "", 3000);
+  } else {
+    st.style.color = "#c0392b";
+    st.textContent = "Error saving zones.";
+  }
+}
+
+function switchCam(name) {
+  activeCam = name;
+  document.querySelectorAll(".cam-tab").forEach(b => b.classList.toggle("active", b.dataset.cam === name));
+  document.getElementById("editor").style.display = "";
+  zones = []; selectedIdx = -1;
+  document.getElementById("btn-delete").disabled = true;
+  refreshFrame();
+  loadZones();
+}
+
+async function init() {
+  const data = await fetch("/api/cameras").then(r => r.json());
+  cameras = data;
+  const tabs = document.getElementById("cam-tabs");
+  if (!cameras.length) {
+    document.getElementById("no-cameras").style.display = "";
+    return;
+  }
+  tabs.innerHTML = cameras.map(c =>
+    `<button class="cam-tab" data-cam="${c.name}" onclick="switchCam('${c.name}')">${c.name}</button>`
+  ).join("");
+  switchCam(cameras[0].name);
+}
+
+init();
+</script>
+</body>
+</html>"""
+
+
+@app.get("/camera")
+def camera_page():
+    return Response(_CAMERA_PAGE, mimetype="text/html")
 
 
 def run(db_path: str, host: str, port: int, debug: bool) -> None:

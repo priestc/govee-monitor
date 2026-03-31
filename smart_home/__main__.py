@@ -14,6 +14,7 @@ from smart_home import labels as _labels
 from smart_home import pvvx as _pvvx
 from smart_home import presence as _presence
 from smart_home import push as _push
+from smart_home import camera as _camera
 from smart_home.battery import dump_gatt
 from smart_home.db import open_db, insert_reading, bulk_insert, insert_no_reading
 
@@ -557,6 +558,47 @@ def configure_push():
     _push.save_credentials(creds)
     click.echo("\nCredentials saved. The monitor will now send push notifications when a presence device goes away.")
     click.echo("\nTo test, run:  smart-home test-push")
+
+
+@main.command("configure-camera")
+def configure_camera():
+    """Add or update an IP camera for motion detection.
+
+    Stores connection details in ~/.config/smart-home/cameras.json.
+    Use the web UI at /camera to define motion zones on the live frame.
+    """
+    click.echo("\nCamera Setup\n")
+    name = click.prompt("Camera name (e.g. 'front-door')").strip()
+
+    use_ip = click.confirm("Build RTSP URL from IP address and credentials?", default=True)
+    if use_ip:
+        ip = click.prompt("Camera IP address (e.g. 192.168.1.100)").strip()
+        username = click.prompt("Username", default="admin").strip()
+        password = click.prompt("Password", hide_input=True)
+        rtsp_url = _camera.build_rtsp_url(ip, username, password, subtype=1)
+        click.echo(f"RTSP URL: {rtsp_url}")
+    else:
+        rtsp_url = click.prompt("Full RTSP URL").strip()
+
+    click.echo("Testing connection (grabbing a frame)...")
+    frame = _camera.get_snapshot_jpeg(rtsp_url)
+    if frame is None:
+        click.echo("⚠️  Could not grab a frame — check the URL and credentials.")
+        click.echo("   Camera will be saved anyway; you can fix the URL and re-run.")
+    else:
+        click.echo(f"✓ Connected ({len(frame)//1024} KB snapshot).")
+
+    cameras = _camera.load_config()
+    existing = next((c for c in cameras if c["name"] == name), None)
+    if existing:
+        existing["rtsp_url"] = rtsp_url
+        click.echo(f"Updated existing camera '{name}'.")
+    else:
+        cameras.append({"name": name, "rtsp_url": rtsp_url, "zones": []})
+        click.echo(f"Added camera '{name}'.")
+
+    _camera.save_config(cameras)
+    click.echo("\nDone. Define motion zones at: http://<your-server>:5000/camera")
 
 
 @main.command("test-push")
@@ -1193,9 +1235,45 @@ def monitor(duration, verbose, db, no_db):
                     click.echo(f"[{ts}] Event check failed: {e}")
             await asyncio.sleep(60)
 
+    cameras_cfg = _camera.load_config()
+    camera_watchers: list[_camera.CameraWatcher] = []
+    for cam in cameras_cfg:
+        w = _camera.CameraWatcher(cam)
+        w.start()
+        camera_watchers.append(w)
+        click.echo(f"Camera watcher started: {cam['name']} ({len(cam.get('zones', []))} zone(s))")
+
+    _camera_notify_times: dict[tuple, datetime.datetime] = {}
+    CAMERA_COOLDOWN = datetime.timedelta(minutes=5)
+
+    async def camera_watch_loop():
+        while True:
+            await asyncio.sleep(1)
+            for w in camera_watchers:
+                while not w.events.empty():
+                    try:
+                        event = w.events.get_nowait()
+                    except Exception:
+                        break
+                    if event[0] == "error":
+                        click.echo(f"[camera:{w.name}] {event[1]}")
+                    elif event[0] == "motion":
+                        zone_name, pct = event[1], event[2]
+                        key = (w.name, zone_name)
+                        now = datetime.datetime.now()
+                        if now - _camera_notify_times.get(key, datetime.datetime.min) >= CAMERA_COOLDOWN:
+                            _camera_notify_times[key] = now
+                            _push.send_notification(
+                                title=f"Motion: {w.name}",
+                                body=f"Movement detected in '{zone_name}' ({pct}% changed)",
+                            )
+                            click.echo(f"[{now.strftime('%H:%M:%S')}] Motion in {w.name}/{zone_name} ({pct}%)")
+
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
         extra = [snapshot_loop(), check_events_loop(), process_stats_loop()]
+        if cameras_cfg:
+            extra.append(camera_watch_loop())
         if presence_devices:
             extra.append(check_presence())
         if ecobee_cfg:
