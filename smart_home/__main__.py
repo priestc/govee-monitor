@@ -943,8 +943,47 @@ def monitor(duration, verbose, db, no_db):
     # Load hourly records from DB:
     # {label_key: {hour_of_day: {temp_max, temp_min, humi_max, humi_min}}}
     # Special keys: "__inside_avg__" and "__in_out_diff__"
+    # Only sensors with >= 1 year of data are eligible for record notifications.
+    ONE_YEAR = datetime.timedelta(days=365)
     hourly_records: dict[str, dict[int, dict]] = {}
+    # labels_with_enough_data: set of label keys eligible for record checks
+    labels_with_enough_data: set[str] = set()
     if conn:
+        # Determine which per-sensor labels have >= 1 year of data
+        age_rows = conn.execute("""
+            SELECT label,
+                   julianday('now') - julianday(MIN(ts)) AS age_days
+            FROM readings
+            WHERE label IS NOT NULL AND temp_f IS NOT NULL
+            GROUP BY label
+        """).fetchall()
+        for lbl, age_days in age_rows:
+            if age_days >= 365:
+                labels_with_enough_data.add(lbl)
+
+        # Check if inside sensors collectively have >= 1 year of data
+        inside_age = conn.execute("""
+            SELECT julianday('now') - julianday(MIN(ts))
+            FROM readings
+            WHERE label LIKE '%inside%' AND temp_f IS NOT NULL
+        """).fetchone()[0] or 0
+        if inside_age >= 365:
+            labels_with_enough_data.add("__inside_avg__")
+
+        # Check if both inside AND outside sensors have >= 1 year of data
+        outside_age = conn.execute("""
+            SELECT julianday('now') - julianday(MIN(ts))
+            FROM readings
+            WHERE label LIKE '%outside%' AND temp_f IS NOT NULL
+        """).fetchone()[0] or 0
+        if inside_age >= 365 and outside_age >= 365:
+            labels_with_enough_data.add("__in_out_diff__")
+
+        if labels_with_enough_data:
+            click.echo(f"Hourly records enabled for: {', '.join(sorted(labels_with_enough_data))}")
+        else:
+            click.echo("Hourly records disabled — no sensor has 1 year of data yet.")
+
         rows = conn.execute("""
             SELECT label,
                    CAST(strftime('%H', ts) AS INTEGER) as hour,
@@ -1217,6 +1256,8 @@ def monitor(duration, verbose, db, no_db):
             h_str = f"{now_hour % 12 or 12}{'AM' if now_hour < 12 else 'PM'}"
 
             def _check_record(label_key: str, temp: float | None, humi: float | None) -> None:
+                if label_key not in labels_with_enough_data:
+                    return
                 display = {
                     "__inside_avg__": "Inside Average",
                     "__in_out_diff__": "In/Out Diff",
