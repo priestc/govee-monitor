@@ -1190,7 +1190,7 @@ _TEMP_PAGE = """\
     .res-row { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.2rem; }
     .res-row label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
     .res-row select { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .3rem .7rem; font-size: .85rem; font-weight: 500; cursor: pointer; }
-    #resp-size { font-size: .72rem; color: #aabbc8; }
+    #resp-size { font-size: .72rem; color: #4a6080; }
   </style>
 </head>
 <body>
@@ -1648,8 +1648,10 @@ function fmtBytes(n) {
 }
 async function fetchJSON(url) {
   const r = await fetch(url);
+  const cl = r.headers.get('content-length');
   const text = await r.text();
-  return { data: JSON.parse(text), bytes: new TextEncoder().encode(text).length };
+  const bytes = cl !== null ? parseInt(cl) : new TextEncoder().encode(text).length;
+  return { data: JSON.parse(text), bytes };
 }
 async function loadChart() {
   let totalBytes = 0;
