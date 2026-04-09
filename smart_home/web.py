@@ -1190,6 +1190,7 @@ _TEMP_PAGE = """\
     .res-row { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.2rem; }
     .res-row label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
     .res-row select { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .3rem .7rem; font-size: .85rem; font-weight: 500; cursor: pointer; }
+    #resp-size { font-size: .72rem; color: #aabbc8; }
   </style>
 </head>
 <body>
@@ -1202,6 +1203,7 @@ _TEMP_PAGE = """\
       <option value="medium">Medium</option>
       <option value="max">Max</option>
     </select>
+    <span id="resp-size"></span>
   </div>
   <div class="btn-group">
     <div class="range-btns" id="sensor-btns">
@@ -1639,16 +1641,28 @@ const chart = new Chart(document.getElementById("chart"), {
   }
 });
 
+function fmtBytes(n) {
+  return n >= 1048576 ? (n/1048576).toFixed(1) + ' MB'
+       : n >= 1024    ? (n/1024).toFixed(1) + ' KB'
+       :                n + ' B';
+}
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  const text = await r.text();
+  return { data: JSON.parse(text), bytes: new TextEncoder().encode(text).length };
+}
 async function loadChart() {
+  let totalBytes = 0;
   if (mode === "recent") {
     const xMax = new Date(Date.now() + offsetMs);
     const xMin = new Date(xMax - rangeDays * 86400000);
     const params = `start=${localISO(xMin)}&end=${localISO(xMax)}&limit=8000&bucket_minutes=${getBucket()}`;
-    const [data, events] = await Promise.all([
-      fetch(`/api/history?${params}`).then(r => r.json()),
-      fetch(`/api/events?start=${localISO(xMin)}&end=${localISO(xMax)}&limit=200`).then(r => r.json()),
+    const [hist, evts] = await Promise.all([
+      fetchJSON(`/api/history?${params}`),
+      fetchJSON(`/api/events?start=${localISO(xMin)}&end=${localISO(xMax)}&limit=200`),
     ]);
-    chart.data.datasets = buildSensorDatasets(data, events, false);
+    totalBytes = hist.bytes + evts.bytes;
+    chart.data.datasets = buildSensorDatasets(hist.data, evts.data, false);
     chart.options.scales.x.min = xMin;
     chart.options.scales.x.max = xMax;
     if (rangeDays === 0.125) {
@@ -1665,7 +1679,8 @@ async function loadChart() {
     document.getElementById('btn-prev').disabled = peek.length === 0;
     document.getElementById('btn-next').disabled = offsetMs >= 0;
   } else if (mode === "month") {
-    const data = await fetch(`/api/history/month?month=${activeMonth}&bucket_minutes=${getBucket()}`).then(r => r.json());
+    const { data, bytes } = await fetchJSON(`/api/history/month?month=${activeMonth}&bucket_minutes=${getBucket()}`);
+    totalBytes = bytes;
     chart.data.datasets = buildSensorDatasets(data, [], true);
     const xMin = new Date(2000, activeMonth - 1, 1);
     const xMax = new Date(2000, activeMonth, 0, 23, 59, 59);
@@ -1673,12 +1688,14 @@ async function loadChart() {
     chart.options.scales.x.max = xMax;
     chart.options.scales.x.time.unit = "day";
   } else {
-    const data = await fetch(`/api/history/year?bucket_minutes=${getBucket()}`).then(r => r.json());
+    const { data, bytes } = await fetchJSON(`/api/history/year?bucket_minutes=${getBucket()}`);
+    totalBytes = bytes;
     chart.data.datasets = buildSensorDatasets(data, [], true);
     chart.options.scales.x.min = new Date(2000, 0, 1);
     chart.options.scales.x.max = new Date(2000, 11, 31, 23, 59, 59);
     chart.options.scales.x.time.unit = "month";
   }
+  document.getElementById('resp-size').textContent = fmtBytes(totalBytes);
   chart.update();
 }
 loadColors().then(loadChart);
