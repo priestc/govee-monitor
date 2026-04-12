@@ -3007,6 +3007,17 @@ def api_garage_status(name):
         return jsonify({"ok": False, "error": str(e)})
 
 
+@app.get("/api/garage/<name>/events")
+def api_garage_events(name):
+    limit = min(int(request.args.get("limit", 200)), 1000)
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT ts, state FROM garage_events WHERE name=? ORDER BY ts DESC LIMIT ?",
+            (name, limit),
+        ).fetchall()
+    return jsonify([{"ts": r["ts"], "state": r["state"]} for r in rows])
+
+
 @app.post("/api/garage/<name>/auto")
 def api_garage_auto(name):
     from smart_home import garage as _garage
@@ -3069,6 +3080,16 @@ _GARAGE_PAGE = """\
                   cursor: pointer; user-select: none; }
     .auto-label input[type=checkbox] { width: 1rem; height: 1rem; cursor: pointer; accent-color: #2e7dd4; }
     #no-garages { color: #7a90a8; font-size: .9rem; }
+    .history { margin-top: 2rem; }
+    .history h2 { font-size: 1rem; font-weight: 700; color: #1a2535; margin-bottom: .8rem;
+                  letter-spacing: -.01em; }
+    .history-table { width: 100%; max-width: 540px; border-collapse: collapse; font-size: .85rem; }
+    .history-table th { text-align: left; color: #7a90a8; font-weight: 600; padding: .3rem .6rem;
+                        border-bottom: 1px solid #e0e8f0; }
+    .history-table td { padding: .35rem .6rem; border-bottom: 1px solid #f0f4f8; color: #1a2535; }
+    .history-table tr:last-child td { border-bottom: none; }
+    .state-open   { color: #c0392b; font-weight: 700; }
+    .state-closed { color: #1a7a4a; font-weight: 700; }
   </style>
 </head>
 <body>
@@ -3078,6 +3099,13 @@ _GARAGE_PAGE = """\
     No garage doors configured. Run <code>smart-home configure-garage</code> on the server.
   </div>
   <div class="doors" id="doors"></div>
+  <div class="history" id="history" style="display:none">
+    <h2>Event History</h2>
+    <table class="history-table">
+      <thead><tr><th>Door</th><th>State</th><th>Time</th></tr></thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </div>
 <script>
 const openSince = {};  // name -> Date when door first seen open
 
@@ -3165,6 +3193,23 @@ async function refreshStatus(name) {
   applyStatus(name, data);
 }
 
+async function loadHistory(garages) {
+  const allEvents = [];
+  for (const g of garages) {
+    const evts = await fetch(`/api/garage/${encodeURIComponent(g.name)}/events`).then(r => r.json());
+    for (const e of evts) allEvents.push({name: g.name, ...e});
+  }
+  allEvents.sort((a, b) => b.ts.localeCompare(a.ts));
+  if (!allEvents.length) return;
+  document.getElementById("history").style.display = "";
+  document.getElementById("history-body").innerHTML = allEvents.map(e => `
+    <tr>
+      <td>${e.name}</td>
+      <td class="state-${e.state}">${e.state.toUpperCase()}</td>
+      <td>${e.ts}</td>
+    </tr>`).join("");
+}
+
 async function load() {
   const garages = await fetch("/api/garage").then(r => r.json());
   const el = document.getElementById("doors");
@@ -3192,6 +3237,7 @@ async function load() {
     if (autoEl) autoEl.checked = !!g.auto;
     refreshStatus(g.name);
   }
+  loadHistory(garages);
 }
 
 load();
