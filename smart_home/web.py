@@ -3137,7 +3137,6 @@ async function setAuto(name, enabled) {
 }
 
 async function trigger(name, btn, lastEl) {
-  if (!confirm(`Trigger "${name}"?`)) return;
   btn.disabled = true;
   btn.textContent = "Triggering…";
   try {
