@@ -3007,6 +3007,15 @@ def api_garage_status(name):
         return jsonify({"ok": False, "error": str(e)})
 
 
+@app.post("/api/garage/<name>/auto")
+def api_garage_auto(name):
+    from smart_home import garage as _garage
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("auto", False))
+    _garage.set_auto(name, enabled)
+    return jsonify({"ok": True})
+
+
 @app.post("/api/garage/<name>/trigger")
 def api_garage_trigger(name):
     from smart_home import garage as _garage
@@ -3056,6 +3065,9 @@ _GARAGE_PAGE = """\
     .trigger-btn:disabled { background: #aabbc8; cursor: default; }
     .last-triggered { font-size: .75rem; color: #aabbc8; text-align: center; min-height: 1em; }
     .open-timer { font-size: .85rem; font-weight: 600; color: #c0392b; min-height: 1.2em; }
+    .auto-label { display: flex; align-items: center; gap: .5rem; font-size: .8rem; color: #4a6080;
+                  cursor: pointer; user-select: none; }
+    .auto-label input[type=checkbox] { width: 1rem; height: 1rem; cursor: pointer; accent-color: #2e7dd4; }
     #no-garages { color: #7a90a8; font-size: .9rem; }
   </style>
 </head>
@@ -3087,6 +3099,14 @@ function tickTimers() {
   }
 }
 setInterval(tickTimers, 1000);
+
+async function setAuto(name, enabled) {
+  await fetch(`/api/garage/${encodeURIComponent(name)}/auto`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({auto: enabled}),
+  });
+}
 
 async function trigger(name, btn, lastEl) {
   if (!confirm(`Trigger "${name}"?`)) return;
@@ -3160,9 +3180,18 @@ async function load() {
       <button class="trigger-btn" id="btn-${g.name}"
         onclick="trigger('${g.name}', this, document.getElementById('last-${g.name}'))">Trigger</button>
       <div class="last-triggered" id="last-${g.name}"></div>
+      <label class="auto-label">
+        <input type="checkbox" id="auto-${g.name}"
+          onchange="setAuto('${g.name}', this.checked)">
+        Automatically open/close
+      </label>
     </div>`).join("");
 
-  for (const g of garages) refreshStatus(g.name);
+  for (const g of garages) {
+    const autoEl = document.getElementById(`auto-${g.name}`);
+    if (autoEl) autoEl.checked = !!g.auto;
+    refreshStatus(g.name);
+  }
 }
 
 load();

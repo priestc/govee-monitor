@@ -24,6 +24,15 @@ def save_config(garages: list[dict]) -> None:
         json.dump(garages, f, indent=2)
 
 
+def set_auto(name: str, enabled: bool) -> None:
+    """Update the auto open/close flag for a named garage door."""
+    garages = load_config()
+    for g in garages:
+        if g["name"] == name:
+            g["auto"] = enabled
+    save_config(garages)
+
+
 def local_subnet() -> str:
     """Return the /24 subnet of the primary outbound interface, e.g. '192.168.1'."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

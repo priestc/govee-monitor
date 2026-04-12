@@ -918,6 +918,25 @@ def monitor(duration, verbose, db, no_db):
                             title="Left home",
                             body=f"{label} left home",
                         )
+                        for g in _garage.load_config():
+                            if g.get("auto"):
+                                try:
+                                    door_status = _garage.get_status(g["ip"])
+                                    if door_status.get("door_closed") is False:
+                                        _garage.trigger(g["ip"], g.get("pulse_seconds", 0.5))
+                                        click.echo(f"[{ts}] Auto-closed garage '{g['name']}' ({label} left)")
+                                except Exception as e:
+                                    click.echo(f"[{ts}] Auto-close failed for '{g['name']}': {e}")
+                    elif new_status == "home":
+                        for g in _garage.load_config():
+                            if g.get("auto"):
+                                try:
+                                    door_status = _garage.get_status(g["ip"])
+                                    if door_status.get("door_closed") is True:
+                                        _garage.trigger(g["ip"], g.get("pulse_seconds", 0.5))
+                                        click.echo(f"[{ts}] Auto-opened garage '{g['name']}' ({label} arrived)")
+                                except Exception as e:
+                                    click.echo(f"[{ts}] Auto-open failed for '{g['name']}': {e}")
                     _presence.append_history({
                         "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
                         "ble_name": ble_name,
