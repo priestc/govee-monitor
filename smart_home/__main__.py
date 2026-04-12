@@ -967,6 +967,10 @@ def monitor(duration, verbose, db, no_db):
                                     if door_status.get("door_closed") is False:
                                         _garage.trigger(g["ip"], g.get("pulse_seconds", 0.5))
                                         click.echo(f"[{ts}] Auto-closed garage '{g['name']}' ({label} left)")
+                                        _push.send_notification(
+                                            title="Garage closing",
+                                            body=f"{g['name']} garage door closing",
+                                        )
                                 except Exception as e:
                                     click.echo(f"[{ts}] Auto-close failed for '{g['name']}': {e}")
                     _presence.append_history({
