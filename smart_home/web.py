@@ -3044,6 +3044,7 @@ _GARAGE_PAGE = """\
     .trigger-btn:active { transform: scale(.97); }
     .trigger-btn:disabled { background: #aabbc8; cursor: default; }
     .last-triggered { font-size: .75rem; color: #aabbc8; text-align: center; min-height: 1em; }
+    .open-timer { font-size: .85rem; font-weight: 600; color: #c0392b; min-height: 1.2em; }
     #no-garages { color: #7a90a8; font-size: .9rem; }
   </style>
 </head>
@@ -3055,6 +3056,27 @@ _GARAGE_PAGE = """\
   </div>
   <div class="doors" id="doors"></div>
 <script>
+const openSince = {};  // name -> Date when door first seen open
+
+function fmtDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sc = s % 60;
+  if (h > 0) return `${h}h ${m}m ${sc}s`;
+  if (m > 0) return `${m}m ${sc}s`;
+  return `${sc}s`;
+}
+
+function tickTimers() {
+  const now = Date.now();
+  for (const [name, since] of Object.entries(openSince)) {
+    const el = document.getElementById(`timer-${name}`);
+    if (el) el.textContent = "Open for " + fmtDuration(now - since);
+  }
+}
+setInterval(tickTimers, 1000);
+
 async function trigger(name, btn, lastEl) {
   if (!confirm(`Trigger "${name}"?`)) return;
   btn.disabled = true;
@@ -3076,21 +3098,29 @@ async function trigger(name, btn, lastEl) {
 }
 
 function applyStatus(name, data) {
-  const el = document.getElementById(`state-${name}`);
+  const stateEl = document.getElementById(`state-${name}`);
+  const timerEl = document.getElementById(`timer-${name}`);
   if (!data.ok) {
-    el.textContent = "⚠️ unreachable";
-    el.className = "door-state unknown";
+    stateEl.textContent = "⚠️ unreachable";
+    stateEl.className = "door-state unknown";
+    timerEl.textContent = "";
+    delete openSince[name];
     return;
   }
   if (data.door_closed === true) {
-    el.textContent = "CLOSED";
-    el.className = "door-state closed";
+    stateEl.textContent = "CLOSED";
+    stateEl.className = "door-state closed";
+    timerEl.textContent = "";
+    delete openSince[name];
   } else if (data.door_closed === false) {
-    el.textContent = "OPEN";
-    el.className = "door-state open";
+    stateEl.textContent = "OPEN";
+    stateEl.className = "door-state open";
+    if (!openSince[name]) openSince[name] = Date.now();
   } else {
-    el.textContent = "UNKNOWN";
-    el.className = "door-state unknown";
+    stateEl.textContent = "UNKNOWN";
+    stateEl.className = "door-state unknown";
+    timerEl.textContent = "";
+    delete openSince[name];
   }
 }
 
@@ -3110,6 +3140,7 @@ async function load() {
     <div class="door-card">
       <div class="door-name">${g.name}</div>
       <div class="door-state unknown" id="state-${g.name}">…</div>
+      <div class="open-timer" id="timer-${g.name}"></div>
       <button class="trigger-btn" id="btn-${g.name}"
         onclick="trigger('${g.name}', this, document.getElementById('last-${g.name}'))">Trigger</button>
       <div class="last-triggered" id="last-${g.name}"></div>
