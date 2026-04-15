@@ -219,6 +219,50 @@ def history_month():
     return jsonify(result)
 
 
+@app.get("/api/history/years")
+def history_years():
+    """Return distinct years present in the readings table."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT strftime('%Y', ts) AS year FROM readings WHERE temp_f IS NOT NULL ORDER BY year DESC"
+        ).fetchall()
+    return jsonify([r["year"] for r in rows])
+
+
+@app.get("/api/history/day")
+def history_day():
+    """All temperature readings for a specific calendar date (YYYY-MM-DD).
+    Query params: year, month (1-12), day (1-31), bucket_minutes (default 5).
+    """
+    year  = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    day   = request.args.get("day", type=int)
+    if not (year and month and day):
+        return jsonify([])
+    bucket_minutes = max(1, request.args.get("bucket_minutes", 5, type=int))
+    bucket_secs = bucket_minutes * 60
+    date_str = f"{year:04d}-{month:02d}-{day:02d}"
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                CAST(strftime('%s', ts) AS INTEGER) / ? * ? AS bucket,
+                label,
+                ROUND(AVG(temp_f), 1) AS temp_f
+            FROM readings
+            WHERE DATE(ts) = ?
+              AND temp_f IS NOT NULL AND label IS NOT NULL
+            GROUP BY bucket, label
+            ORDER BY bucket ASC
+        """, (bucket_secs, bucket_secs, date_str)).fetchall()
+    import datetime as _dt
+    result = []
+    for r in rows:
+        d = dict(r)
+        ts = _dt.datetime.utcfromtimestamp(d["bucket"]).strftime("%Y-%m-%d %H:%M:%S")
+        result.append({"ts": ts, "label": d["label"], "temp_f": d["temp_f"]})
+    return jsonify(result)
+
+
 @app.get("/api/history/year")
 def history_year():
     """All temperature readings across the full year, normalized to year 2000 for overlay.
@@ -1191,6 +1235,12 @@ _TEMP_PAGE = """\
     .res-row label { font-size: .72rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
     .res-row select { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .3rem .7rem; font-size: .85rem; font-weight: 500; cursor: pointer; }
     #resp-size { font-size: .72rem; color: #4a6080; }
+    .day-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+    .day-row select, .day-row input[type=number] { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .35rem .7rem; font-size: .85rem; font-weight: 500; cursor: pointer; }
+    .day-row input[type=number] { width: 5rem; }
+    .day-row button { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px; padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
+    .day-row button:hover { background: #f0f4f8; border-color: #aabbc8; }
+    .day-row button.active { background: #e07820; color: #fff; border-color: #e07820; }
   </style>
 </head>
 <body>
@@ -1242,12 +1292,28 @@ _TEMP_PAGE = """\
       <button onclick="setMonth(12)">Dec</button>
     </div>
   </div>
+  <div class="btn-group">
+    <div class="btn-group-label">By Day</div>
+    <div class="day-row">
+      <select id="day-month">
+        <option value="1">January</option><option value="2">February</option>
+        <option value="3">March</option><option value="4">April</option>
+        <option value="5">May</option><option value="6">June</option>
+        <option value="7">July</option><option value="8">August</option>
+        <option value="9">September</option><option value="10">October</option>
+        <option value="11">November</option><option value="12">December</option>
+      </select>
+      <input type="number" id="day-day" min="1" max="31" placeholder="Day" style="width:5rem">
+      <select id="day-year"><option value="">Year</option></select>
+      <button id="day-go-btn" onclick="applyDay()">Go</button>
+    </div>
+  </div>
   <div class="chart-wrap"><h2>Temperature (&deg;F)</h2><canvas id="chart" height="120"></canvas></div>
 <script>
 const COLORS = ["#e07820","#2e7dd4","#2a9d6e","#9b4dca","#c0392b","#16a085","#d35400","#8e44ad","#27ae60","#2980b9","#e74c3c","#f39c12"];
 const colorMap = {};
 function labelColor(lbl) { return colorMap[lbl] ?? COLORS[0]; }
-let mode = "recent", rangeDays = 1, activeMonth = null, offsetMs = 0;
+let mode = "recent", rangeDays = 1, activeMonth = null, activeDay = null, offsetMs = 0;
 const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const isLocal = /^192\\.168\\./.test(location.hostname) || /\\.local$/.test(location.hostname);
 let resolution = isLocal ? "max" : isMobile ? "low" : "medium";
@@ -1545,11 +1611,13 @@ function shiftView(dir) {
   if (offsetMs > 0) offsetMs = 0;
   loadChart();
 }
+function clearDayActive() { document.getElementById('day-go-btn').classList.remove('active'); }
 function setRange(days) {
   mode = "recent"; rangeDays = days; offsetMs = 0;
   document.querySelectorAll("#recent-btns button[data-days]").forEach(b =>
     b.classList.toggle("active", parseFloat(b.dataset.days) === days));
   document.querySelectorAll("#month-btns button").forEach(b => b.classList.remove("active"));
+  clearDayActive();
   loadChart();
 }
 function setAllMonths() {
@@ -1559,6 +1627,7 @@ function setAllMonths() {
     b.classList.toggle("active", i === 0));
   document.getElementById('btn-prev').disabled = true;
   document.getElementById('btn-next').disabled = true;
+  clearDayActive();
   loadChart();
 }
 function setMonth(m) {
@@ -1568,6 +1637,20 @@ function setMonth(m) {
     b.classList.toggle("active", i === m));
   document.getElementById('btn-prev').disabled = true;
   document.getElementById('btn-next').disabled = true;
+  clearDayActive();
+  loadChart();
+}
+function applyDay() {
+  const m = parseInt(document.getElementById('day-month').value);
+  const d = parseInt(document.getElementById('day-day').value);
+  const y = parseInt(document.getElementById('day-year').value);
+  if (!m || !d || !y || d < 1 || d > 31) return;
+  mode = "day"; activeDay = {year: y, month: m, day: d};
+  document.querySelectorAll("#recent-btns button[data-days]").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll("#month-btns button").forEach(b => b.classList.remove("active"));
+  document.getElementById('btn-prev').disabled = true;
+  document.getElementById('btn-next').disabled = true;
+  document.getElementById('day-go-btn').classList.add('active');
   loadChart();
 }
 
@@ -1689,6 +1772,17 @@ async function loadChart() {
     chart.options.scales.x.min = xMin;
     chart.options.scales.x.max = xMax;
     chart.options.scales.x.time.unit = "day";
+  } else if (mode === "day" && activeDay) {
+    const { year, month, day } = activeDay;
+    const { data, bytes } = await fetchJSON(`/api/history/day?year=${year}&month=${month}&day=${day}&bucket_minutes=${getBucket()}`);
+    totalBytes = bytes;
+    chart.data.datasets = buildSensorDatasets(data, [], false);
+    const xMin = new Date(year, month - 1, day, 0, 0, 0);
+    const xMax = new Date(year, month - 1, day, 23, 59, 59);
+    chart.options.scales.x.min = xMin;
+    chart.options.scales.x.max = xMax;
+    chart.options.scales.x.time.unit = "hour";
+    chart.options.scales.x.ticks.stepSize = 1;
   } else {
     const { data, bytes } = await fetchJSON(`/api/history/year?bucket_minutes=${getBucket()}`);
     totalBytes = bytes;
@@ -1700,8 +1794,15 @@ async function loadChart() {
   document.getElementById('resp-size').textContent = fmtBytes(totalBytes);
   chart.update();
 }
-loadColors().then(loadChart);
-setInterval(() => loadColors().then(loadChart), 30000);
+async function populateYears() {
+  const years = await fetch("/api/history/years").then(r => r.json());
+  const sel = document.getElementById('day-year');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Year</option>' +
+    years.map(y => `<option value="${y}"${y == cur ? ' selected' : ''}>${y}</option>`).join('');
+}
+loadColors().then(() => { populateYears(); loadChart(); });
+setInterval(() => { if (mode !== "day") loadColors().then(loadChart); }, 30000);
 </script>
 </body>
 </html>"""
