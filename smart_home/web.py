@@ -1797,9 +1797,14 @@ async function loadChart() {
 async function populateYears() {
   const years = await fetch("/api/history/years").then(r => r.json());
   const sel = document.getElementById('day-year');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">Year</option>' +
-    years.map(y => `<option value="${y}"${y == cur ? ' selected' : ''}>${y}</option>`).join('');
+  const now = new Date();
+  // Pre-fill controls with today if not already set
+  if (!document.getElementById('day-day').value) {
+    document.getElementById('day-month').value = now.getMonth() + 1;
+    document.getElementById('day-day').value = now.getDate();
+  }
+  const cur = sel.value || String(now.getFullYear());
+  sel.innerHTML = years.map(y => `<option value="${y}"${String(y) === cur ? ' selected' : ''}>${y}</option>`).join('');
 }
 loadColors().then(() => { populateYears(); loadChart(); });
 setInterval(() => { if (mode !== "day") loadColors().then(loadChart); }, 30000);
