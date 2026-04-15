@@ -1326,6 +1326,7 @@ const BUCKETS = {
   },
   month:  { low: 240, medium: 60, max: 10 },
   year:   { low: 1440, medium: 360, max: 60 },
+  day:    { low: 30, medium: 10, max: 2 },
 };
 function getBucket() {
   if (mode === "recent") return BUCKETS.recent[resolution][rangeDays] || 60;
