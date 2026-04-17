@@ -106,6 +106,40 @@ sudo systemctl restart smart-home.service
 
 ---
 
+## Adding a Camera (XIAO ESP32-S3 Sense)
+
+### 1. Flash the firmware
+
+Open `firmware/camera/camera.ino` in Arduino IDE.
+
+Before flashing, edit the two lines at the top of the file:
+
+```cpp
+const char* WIFI_SSID = "YOUR_SSID";
+const char* WIFI_PASS = "YOUR_PASSWORD";
+```
+
+Board settings:
+- **Board:** XIAO_ESP32S3
+- **PSRAM:** OPI PSRAM
+- **Partition Scheme:** Huge APP (3MB No OTA/1MB SPIFFS)
+
+Flash, then open the Serial Monitor at 115200 baud. The camera will print its IP address once connected to WiFi. Verify it works by opening `http://<ip>/snapshot` in a browser.
+
+### 2. Register the camera
+
+```bash
+smart-home configure-camera
+```
+
+Enter the camera name and its IP address. The server will test connectivity by grabbing a snapshot.
+
+### 3. Define motion zones
+
+Open the web UI at `http://<your-server>:5000/camera`, select your camera, and draw zones on the live frame. Motion in a zone triggers a push notification.
+
+---
+
 ## Running the Monitor
 
 Scan and print readings continuously:

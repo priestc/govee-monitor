@@ -564,75 +564,33 @@ def configure_push():
 
 @main.command("configure-camera")
 def configure_camera():
-    """Add or update an IP camera for motion detection.
+    """Add or update an XIAO ESP32-S3 camera.
 
-    Stores connection details in ~/.config/smart-home/cameras.json.
+    Stores the camera's IP in ~/.config/smart-home/cameras.json.
     Use the web UI at /camera to define motion zones on the live frame.
     """
+    import httpx
+
     click.echo("\nCamera Setup\n")
     name = click.prompt("Camera name (e.g. 'front-door')").strip()
+    ip   = click.prompt("Camera IP address (e.g. 192.168.1.100)").strip()
+    url  = f"http://{ip}"
 
-    use_ip = click.confirm("Build RTSP URL from IP address and credentials?", default=True)
-    if use_ip:
-        ip = click.prompt("Camera IP address (e.g. 192.168.1.100)").strip()
-
-        # Probe common ports before asking for credentials
-        PROBE_PORTS = [80, 443, 554, 8080, 8554, 37777]
-        click.echo(f"Probing {ip} for open ports {PROBE_PORTS}...")
-        open_ports = _camera.probe_ports(ip, PROBE_PORTS)
-        if not open_ports:
-            click.echo(f"⚠️  No response on any port — is {ip} reachable and powered on?")
-        else:
-            click.echo(f"   Open ports: {open_ports}")
-            if 554 not in open_ports and 8554 not in open_ports:
-                click.echo("   ⚠️  Neither 554 nor 8554 is open — RTSP may be disabled on this camera.")
-                click.echo("      Check the camera's app/web settings and enable RTSP streaming.")
-            if 80 in open_ports or 8080 in open_ports:
-                web_port = 80 if 80 in open_ports else 8080
-                click.echo(f"   ℹ️  Web interface may be at http://{ip}:{web_port}/")
-
-        username = click.prompt("Username", default="admin").strip()
-        password = click.prompt("Password", hide_input=True)
-
-        # Try subtype=1 first (sub stream), fall back to subtype=0 (main stream)
-        rtsp_port = 554 if (not open_ports or 554 in open_ports) else (8554 if 8554 in open_ports else 554)
-        rtsp_url = _camera.build_rtsp_url(ip, username, password, port=rtsp_port, subtype=1)
-        click.echo(f"\nRTSP URL (sub stream):  {rtsp_url}")
-    else:
-        ip = None
-        rtsp_url = click.prompt("Full RTSP URL").strip()
-
-    click.echo("Testing connection (grabbing a frame)...")
-    jpeg, err = _camera.get_snapshot_jpeg(rtsp_url)
+    click.echo("Testing connection (grabbing a snapshot)...")
+    jpeg, err = _camera.get_snapshot_jpeg(url)
     if jpeg is None:
-        click.echo(f"⚠️  Sub stream failed: {err}")
-        if use_ip:
-            # Try main stream as fallback
-            rtsp_url_main = _camera.build_rtsp_url(ip, username, password, port=rtsp_port, subtype=0)
-            click.echo(f"   Trying main stream: {rtsp_url_main}")
-            jpeg, err = _camera.get_snapshot_jpeg(rtsp_url_main)
-            if jpeg is None:
-                click.echo(f"⚠️  Main stream also failed: {err}")
-                click.echo("\nPossible causes:")
-                click.echo("  • RTSP is disabled — enable it in the camera's settings (often under 'Video' or 'Network')")
-                click.echo("  • Wrong credentials")
-                click.echo("  • Camera uses a non-standard RTSP path")
-                click.echo("\nCamera will be saved anyway. Fix the issue and re-run configure-camera.")
-            else:
-                click.echo(f"✓ Main stream works ({len(jpeg)//1024} KB). Saving main-stream URL.")
-                rtsp_url = rtsp_url_main
-        else:
-            click.echo("   Camera will be saved anyway; you can fix the URL and re-run.")
+        click.echo(f"⚠️  Could not connect: {err}")
+        click.echo("   Saved anyway — make sure the camera is powered and on the same network.")
     else:
         click.echo(f"✓ Connected ({len(jpeg)//1024} KB snapshot).")
 
     cameras = _camera.load_config()
     existing = next((c for c in cameras if c["name"] == name), None)
     if existing:
-        existing["rtsp_url"] = rtsp_url
+        existing["url"] = url
         click.echo(f"Updated existing camera '{name}'.")
     else:
-        cameras.append({"name": name, "rtsp_url": rtsp_url, "zones": []})
+        cameras.append({"name": name, "url": url, "zones": []})
         click.echo(f"Added camera '{name}'.")
 
     _camera.save_config(cameras)
