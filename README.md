@@ -6,6 +6,7 @@ A Linux-based smart home monitoring system. Currently supports BLE temperature/h
 
 - **Govee H5074** — passive BLE, no pairing required
 - **Xiaomi LYWSD03MMC** — requires [ATC_MiThermometer](https://github.com/pvvx/ATC_MiThermometer) custom firmware for open BLE broadcasting
+- **Govee H5086** — smart plug with energy monitoring (passive BLE + GATT)
 
 ---
 
@@ -145,6 +146,36 @@ Example:
 
 ```
 GET /api/history?label=inside&start=2026-03-01&limit=5000
+```
+
+---
+
+## Adding a Smart Plug (Govee H5086)
+
+Run the `configure-plug` command on the server. It will scan for nearby H5086 plugs and prompt you to assign a label to each one found.
+
+```bash
+smart-home configure-plug
+```
+
+Example session:
+
+```
+Scanning for Govee H5086 plugs (10s)...
+
+Found 1 plug(s). Enter a label for each (leave blank to skip):
+
+  GVH5086_AB12 (A4:C1:38:D2:AB:12): washing machine
+
+Labels saved to ~/.config/smart-home/plugs.json
+```
+
+Once registered, the monitor will passively track on/off state from BLE advertisements and connect via GATT every 60 seconds to read energy data (watts, volts, amps, kWh, power factor).
+
+View current readings and history at:
+
+```
+http://<your-machine-ip>:5000/plugs
 ```
 
 ---
