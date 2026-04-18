@@ -3066,11 +3066,6 @@ async function init() {
   }
   document.getElementById("zones-link").style.display = "";
   const tabs = document.getElementById("cam-tabs");
-  tabs.innerHTML = cameras.map(c =>
-    `<button class="cam-tab" data-cam="${c.name}" onclick="switchCam('${c.name()}')">${c.name}</button>`
-  ).join("");
-  // Fix: use proper escaping
-  tabs.innerHTML = "";
   cameras.forEach(c => {
     const btn = document.createElement("button");
     btn.className = "cam-tab";
