@@ -64,3 +64,33 @@ def load_history() -> list[dict]:
                 except json.JSONDecodeError:
                     pass
     return entries
+
+
+def save_history(entries: list[dict]) -> None:
+    """Rewrite the entire history file."""
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(_HISTORY_FILE, "w") as f:
+        for entry in entries:
+            f.write(json.dumps(entry) + "\n")
+
+
+def delete_away_period(ble_name: str, start: str, end: str) -> int:
+    """Remove the 'away' entry at start and 'home' entry at end for ble_name.
+
+    Returns the number of entries removed.
+    """
+    entries = load_history()
+    before = len(entries)
+    # Normalise to bare seconds (strip sub-second and timezone)
+    start_s = start[:19]
+    end_s   = end[:19]
+    entries = [
+        e for e in entries
+        if not (
+            e.get("ble_name") == ble_name
+            and e.get("ts", "")[:19] in (start_s, end_s)
+            and e.get("status") in ("away", "home")
+        )
+    ]
+    save_history(entries)
+    return before - len(entries)

@@ -103,12 +103,26 @@ def presence_history_api():
         ]
         result.append({
             "name":        label,
+            "ble_name":    ble_name,
             "status":      s.get("status", "unknown"),
             "last_seen":   s.get("last_seen"),
             "windows":     windows,
             "recent_away": list(reversed(away_list))[:25],
         })
     return jsonify(result)
+
+
+@app.delete("/api/presence/history")
+def presence_delete_away():
+    from smart_home.presence import delete_away_period
+    body = request.get_json(silent=True) or {}
+    ble_name = body.get("ble_name")
+    start    = body.get("start")
+    end      = body.get("end")
+    if not (ble_name and start and end):
+        return ("Missing ble_name, start, or end", 400)
+    removed = delete_away_period(ble_name, start, end)
+    return jsonify({"removed": removed})
 
 
 @app.get("/api/presence")
@@ -340,9 +354,11 @@ def presence_page():
     .stat-box .sb-sub   { font-size: .75rem; color: #7a90a8; margin-top: .1rem; }
     .away-title { font-size: .75rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: .6rem; }
     .away-list { display: flex; flex-direction: column; gap: .4rem; }
-    .away-row { display: flex; justify-content: space-between; align-items: baseline; font-size: .85rem; padding: .4rem .6rem; border-radius: 6px; background: #f8f9fb; gap: 1rem; }
-    .away-row .ar-time { color: #4a6080; }
+    .away-row { display: flex; justify-content: space-between; align-items: center; font-size: .85rem; padding: .4rem .6rem; border-radius: 6px; background: #f8f9fb; gap: 1rem; }
+    .away-row .ar-time { color: #4a6080; flex: 1; }
     .away-row .ar-dur  { color: #7a90a8; font-size: .78rem; white-space: nowrap; }
+    .away-row .ar-del  { background: none; border: none; cursor: pointer; color: #c0392b; font-size: 1rem; line-height: 1; padding: 0 .2rem; opacity: .5; transition: opacity .15s; flex-shrink: 0; }
+    .away-row .ar-del:hover { opacity: 1; }
     .empty { color: #7a90a8; font-size: .9rem; }
     .win-tabs { display: flex; gap: .4rem; margin-bottom: .9rem; }
     .win-tab { background: #f0f4f8; color: #4a6080; border: none; border-radius: 6px; padding: .3rem .9rem; cursor: pointer; font-size: .8rem; font-weight: 600; transition: all .15s; }
@@ -390,9 +406,10 @@ function renderDevice(d) {
   const awayHtml = d.recent_away.length === 0
     ? '<p class="empty">No away periods recorded.</p>'
     : '<div class="away-list">' + d.recent_away.map(a =>
-        `<div class="away-row">
+        `<div class="away-row" data-start="${a.start}" data-end="${a.end}" data-ble="${d.ble_name}">
           <span class="ar-time">${fmtDt(a.start)} &rarr; ${fmtDt(a.end)}</span>
           <span class="ar-dur">${fmtDur(a.duration_secs)}</span>
+          <button class="ar-del" title="Delete this away event" onclick="deleteAway(this)">&#x2715;</button>
         </div>`).join("") + "</div>";
 
   return `<div class="device" data-name="${d.name}" data-windows='${JSON.stringify(d.windows)}'>
@@ -424,6 +441,27 @@ function switchWin(btn, name, days) {
         <div class="stat-box"><div class="sb-label">Time home</div><div class="sb-val">${fmtDur(w.home_secs)}</div><div class="sb-sub">${w.home_pct ?? '?'}%</div></div>
         <div class="stat-box"><div class="sb-label">Time away</div><div class="sb-val">${fmtDur(w.away_secs)}</div><div class="sb-sub">${w.away_pct ?? '?'}%</div></div>
       </div>`;
+}
+
+async function deleteAway(btn) {
+  const row = btn.closest(".away-row");
+  const { start, end, ble } = row.dataset;
+  btn.disabled = true;
+  btn.textContent = "…";
+  const r = await fetch("/api/presence/history", {
+    method: "DELETE",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ble_name: ble, start, end}),
+  });
+  if (r.ok) {
+    row.style.transition = "opacity .2s";
+    row.style.opacity = "0";
+    setTimeout(() => row.remove(), 200);
+  } else {
+    btn.disabled = false;
+    btn.textContent = "\u2715";
+    alert("Delete failed: " + await r.text());
+  }
 }
 
 async function load() {
