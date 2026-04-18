@@ -153,8 +153,9 @@ async def scan(
 
     async def _run():
         # BlueZ can hold a stale scan registration for several seconds after a
-        # crash/restart. Retry with backoff until it clears.
-        for attempt in range(10):
+        # crash/restart. Retry indefinitely with a fixed wait until it clears.
+        attempt = 0
+        while True:
             try:
                 scanner = BleakScanner(detection_callback=detection_callback)
                 if scanner_ref is not None:
@@ -177,9 +178,9 @@ async def scan(
                 return  # clean exit
             except Exception as e:
                 if "InProgress" in str(e) or "Operation already in progress" in str(e):
-                    wait = 5 * (attempt + 1)
-                    print(f"BLE scanner busy (BlueZ stale registration), retrying in {wait}s...")
-                    await asyncio.sleep(wait)
+                    attempt += 1
+                    print(f"BLE scanner busy (BlueZ stale registration), retrying in 15s... (attempt {attempt})")
+                    await asyncio.sleep(15)
                 else:
                     raise
 
