@@ -575,21 +575,35 @@ def configure_camera():
     ip   = click.prompt("Camera IP address (e.g. 192.168.1.100)").strip()
     url  = f"http://{ip}"
 
-    click.echo("Testing connection (grabbing a snapshot)...")
-    jpeg, err = _camera.get_snapshot_jpeg(url)
-    if jpeg is None:
-        click.echo(f"⚠️  Could not connect: {err}")
-        click.echo("   Saved anyway — make sure the camera is powered and on the same network.")
-    else:
-        click.echo(f"✓ Connected ({len(jpeg)//1024} KB snapshot).")
+    import httpx
+
+    SNAPSHOT_PATHS = ["/snapshot", "/capture", "/jpg", "/image.jpg"]
+    click.echo("Probing snapshot endpoint...")
+    snapshot_path = None
+    for path in SNAPSHOT_PATHS:
+        try:
+            r = httpx.get(f"{url}{path}", timeout=5.0)
+            if r.status_code == 200 and "image" in r.headers.get("content-type", ""):
+                snapshot_path = path
+                click.echo(f"✓ Connected via {path} ({len(r.content)//1024} KB snapshot).")
+                break
+        except Exception:
+            pass
+
+    if snapshot_path is None:
+        snapshot_path = click.prompt(
+            "Could not auto-detect snapshot path. Enter it manually (e.g. /capture)",
+            default="/snapshot",
+        ).strip()
 
     cameras = _camera.load_config()
     existing = next((c for c in cameras if c["name"] == name), None)
     if existing:
         existing["url"] = url
+        existing["snapshot_path"] = snapshot_path
         click.echo(f"Updated existing camera '{name}'.")
     else:
-        cameras.append({"name": name, "url": url, "zones": []})
+        cameras.append({"name": name, "url": url, "snapshot_path": snapshot_path, "zones": []})
         click.echo(f"Added camera '{name}'.")
 
     _camera.save_config(cameras)

@@ -2882,7 +2882,7 @@ def api_camera_snapshot(name):
     cam = next((c for c in cameras if c["name"] == name), None)
     if cam is None:
         return ("Camera not found", 404)
-    jpeg, err = _camera.get_snapshot_jpeg(cam["url"])
+    jpeg, err = _camera.get_snapshot_jpeg(cam["url"], cam.get("snapshot_path", "/snapshot"))
     if jpeg is None:
         return (f"Could not grab frame: {err}", 502)
     return Response(jpeg, mimetype="image/jpeg")

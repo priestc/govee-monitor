@@ -25,14 +25,14 @@ def save_config(cameras: list[dict]) -> None:
         json.dump(cameras, f, indent=2)
 
 
-def get_snapshot_jpeg(base_url: str) -> tuple[bytes | None, str | None]:
-    """Fetch a JPEG from GET <base_url>/snapshot.
+def get_snapshot_jpeg(base_url: str, snapshot_path: str = "/snapshot") -> tuple[bytes | None, str | None]:
+    """Fetch a JPEG from GET <base_url><snapshot_path>.
 
     Returns (jpeg_bytes, None) on success or (None, error_message) on failure.
     """
     import httpx
     try:
-        r = httpx.get(f"{base_url.rstrip('/')}/snapshot", timeout=5.0)
+        r = httpx.get(f"{base_url.rstrip('/')}{snapshot_path}", timeout=5.0)
         r.raise_for_status()
         return r.content, None
     except Exception as e:
@@ -59,6 +59,7 @@ class CameraWatcher:
     def __init__(self, camera: dict):
         self.name: str = camera["name"]
         self.base_url: str = camera["url"].rstrip("/")
+        self.snapshot_path: str = camera.get("snapshot_path", "/snapshot")
         self.zones: list[dict] = list(camera.get("zones", []))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -98,7 +99,7 @@ class CameraWatcher:
         while not self._stop.is_set():
             # Fetch a frame
             try:
-                r = httpx.get(f"{self.base_url}/snapshot", timeout=5.0)
+                r = httpx.get(f"{self.base_url}{self.snapshot_path}", timeout=5.0)
                 r.raise_for_status()
                 buf = np.frombuffer(r.content, dtype=np.uint8)
                 frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
