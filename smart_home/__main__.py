@@ -16,7 +16,6 @@ from smart_home import presence as _presence
 from smart_home import push as _push
 from smart_home import camera as _camera
 from smart_home import garage as _garage
-from smart_home import plug as _plug
 from smart_home.battery import dump_gatt
 from smart_home.db import open_db, insert_reading, bulk_insert, insert_no_reading
 
@@ -670,61 +669,6 @@ def configure_garage():
     click.echo(f"\nDone. Control it at: http://<your-server>:5000/garage")
 
 
-@main.command("configure-plug")
-@click.option("--timeout", "-t", type=float, default=15.0,
-              help="Seconds to scan for plugs (default: 15).")
-def configure_plug(timeout):
-    """Register a Govee H5086 smart plug for energy monitoring.
-
-    Scans for GVH5086 devices nearby and saves their address and label.
-    """
-    click.echo(f"\nScanning for GVH5086 plugs ({int(timeout)}s)...")
-    found: dict[str, str] = {}  # address -> ble_name
-
-    def callback(device, adv):
-        if _plug.is_h5086(device, adv) and device.address not in found:
-            found[device.address] = device.name or adv.local_name or device.address
-
-    async def _run():
-        from bleak import BleakScanner
-        async with BleakScanner(detection_callback=callback):
-            await asyncio.sleep(timeout)
-
-    try:
-        asyncio.run(_run())
-    except KeyboardInterrupt:
-        pass
-
-    if not found:
-        click.echo("No GVH5086 plugs found.")
-        return
-
-    plugs = _plug.load_config()
-    existing_addrs = {p["address"].upper() for p in plugs}
-
-    click.echo(f"\nFound {len(found)} plug(s):\n")
-    items = list(found.items())
-    for i, (addr, name) in enumerate(items, 1):
-        tag = "  (already configured)" if addr.upper() in existing_addrs else ""
-        click.echo(f"  {i}. {name}  ({addr}){tag}")
-
-    idx = click.prompt("\nSelect plug number", type=click.IntRange(1, len(items))) - 1
-    addr, name = items[idx]
-    label = click.prompt("Label for this plug (e.g. 'washing-machine')").strip()
-
-    # Update existing entry or append new
-    existing = next((p for p in plugs if p["address"].upper() == addr.upper()), None)
-    if existing:
-        existing["label"] = label
-        click.echo(f"Updated '{label}'.")
-    else:
-        plugs.append({"address": addr, "label": label, "name": name})
-        click.echo(f"Added '{label}'.")
-
-    _plug.save_config(plugs)
-    click.echo("Saved. Start 'smart-home monitor' to begin polling energy data.")
-
-
 @main.command("remove-camera")
 @click.argument("name")
 def remove_camera(name):
@@ -755,22 +699,6 @@ def remove_garage(name):
         return
     _garage.save_config(garages)
     click.echo(f"Removed garage '{name}'.")
-
-
-@main.command("remove-plug")
-@click.argument("label")
-def remove_plug(label):
-    """Remove a smart plug by label."""
-    plugs = _plug.load_config()
-    before = len(plugs)
-    plugs = [p for p in plugs if p.get("label") != label]
-    if len(plugs) == before:
-        click.echo(f"No plug with label {label!r}. Configured plugs:")
-        for p in plugs:
-            click.echo(f"  {p.get('label')}  ({p.get('address')})")
-        return
-    _plug.save_config(plugs)
-    click.echo(f"Removed plug '{label}'.")
 
 
 @main.command("remove-presence-device")
@@ -928,14 +856,6 @@ def monitor(duration, verbose, db, no_db):
     _last_poll_ok: dict[str, datetime.datetime] = {}  # address -> last successful poll time
     POLL_COOLDOWN = datetime.timedelta(seconds=30)
 
-    # H5086 smart plugs — same GATT-on-advertisement pattern as Xiaomi
-    plug_label_map = _plug.load_labels()   # address (upper) -> label
-    plug_devices: dict[str, tuple] = {}    # address -> (BLEDevice, ble_name)
-    _plug_poll_active: set[str] = set()
-    _plug_last_poll_ok: dict[str, datetime.datetime] = {}
-    _plug_last_poll_attempt: dict[str, datetime.datetime] = {}
-    PLUG_POLL_COOLDOWN = datetime.timedelta(seconds=60)
-    latest_plug_reading: dict[str, dict] = {}  # address -> reading dict
     scanner_ref: list = []
 
     # presence tracking
@@ -1030,18 +950,6 @@ def monitor(duration, verbose, db, no_db):
                     asyncio.get_running_loop().create_task(_poll_xiaomi(addr))
                 except RuntimeError:
                     _poll_active.discard(addr)
-
-        if _plug.is_h5086(device, adv) and device.address.upper() in plug_label_map:
-            addr = device.address
-            plug_devices[addr] = (device, ble_name)
-            last_attempt = _plug_last_poll_attempt.get(addr, datetime.datetime.min)
-            if addr not in _plug_poll_active and (now - last_attempt) >= PLUG_POLL_COOLDOWN:
-                _plug_poll_active.add(addr)
-                _plug_last_poll_attempt[addr] = now
-                try:
-                    asyncio.get_running_loop().create_task(_poll_plug(addr, adv))
-                except RuntimeError:
-                    _plug_poll_active.discard(addr)
 
         if verbose and ble_name:
             click.echo(f"[presence] untracked: {ble_name!r} ({device.address})")
@@ -1243,38 +1151,6 @@ def monitor(duration, verbose, db, no_db):
         finally:
             _poll_active.discard(addr)
 
-    async def _poll_plug(addr: str, adv) -> None:
-        """Poll one H5086 plug via GATT for energy data."""
-        try:
-            await asyncio.sleep(0.5)
-            entry = plug_devices.get(addr)
-            if entry is None:
-                return
-            ble_device, ble_name = entry
-            label = plug_label_map.get(addr.upper()) or ble_name or addr
-            log_ts = datetime.datetime.now().strftime("%H:%M:%S")
-            click.echo(f"[{log_ts}] Polling plug {label} ({addr})...")
-            is_on = _plug.parse_on_off(adv)
-            reading, err = await _plug.read_energy(ble_device)
-            log_ts = datetime.datetime.now().strftime("%H:%M:%S")
-            if reading is not None:
-                reading["is_on"] = is_on
-                reading["address"] = addr
-                reading["label"] = label
-                _plug_last_poll_ok[addr] = datetime.datetime.now()
-                latest_plug_reading[addr] = reading
-                click.echo(
-                    f"[{log_ts}] Plug OK: {label} "
-                    f"{reading['watts']:.1f}W  {reading['volts']:.1f}V  "
-                    f"{reading['amps']:.2f}A  {reading['energy_wh']:.1f}Wh"
-                )
-            else:
-                click.echo(f"[{log_ts}] Plug FAILED: {label} ({addr}): {err}")
-                if err and "not found" in err:
-                    plug_devices.pop(addr, None)
-        finally:
-            _plug_poll_active.discard(addr)
-
     # latest reading per address, updated on every advertisement
     latest_reading: dict[str, object] = {}
     # high-res buffer: label -> [(epoch_time, temp_f), ...] kept for ~60 seconds
@@ -1445,16 +1321,6 @@ def monitor(duration, verbose, db, no_db):
                             _push.send_notification(title="Sensor Offline", body=f"{label} has stopped responding")
                             click.echo(f"[{log_ts}] Sensor offline: {label}")
 
-            # Write plug readings snapshot
-            for r in latest_plug_reading.values():
-                conn.execute(
-                    "INSERT OR IGNORE INTO plug_readings "
-                    "(ts, address, label, watts, volts, amps, energy_wh, power_factor, is_on) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)",
-                    (ts, r.get("address"), r.get("label"), r.get("watts"), r.get("volts"),
-                     r.get("amps"), r.get("energy_wh"), r.get("power_factor"),
-                     1 if r.get("is_on") else 0),
-                )
             conn.commit()
             n = len(latest_reading)
             click.echo(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Snapshot written: {n} sensor(s) at {ts}")
