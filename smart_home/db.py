@@ -64,6 +64,16 @@ def open_db(path: str) -> sqlite3.Connection:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS garage_events_name_ts ON garage_events (name, ts DESC)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS camera_events (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts      TEXT NOT NULL,
+            camera  TEXT NOT NULL,
+            zone    TEXT NOT NULL,
+            pct     REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS camera_events_camera_ts ON camera_events (camera, ts DESC)")
     conn.commit()
     return conn
 

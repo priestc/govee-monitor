@@ -1535,6 +1535,13 @@ def monitor(duration, verbose, db, no_db):
                         zone_name, pct = event[1], event[2]
                         key = (w.name, zone_name)
                         now = datetime.datetime.now()
+                        ts = now.strftime("%Y-%m-%d %H:%M:%S")
+                        if conn:
+                            conn.execute(
+                                "INSERT INTO camera_events (ts, camera, zone, pct) VALUES (?,?,?,?)",
+                                (ts, w.name, zone_name, pct),
+                            )
+                            conn.commit()
                         if now - _camera_notify_times.get(key, datetime.datetime.min) >= CAMERA_COOLDOWN:
                             _camera_notify_times[key] = now
                             _push.send_notification(

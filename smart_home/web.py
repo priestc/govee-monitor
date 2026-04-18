@@ -2633,7 +2633,7 @@ def index():
     <a href="/chart/signal"      class="chart-link"><span class="cl-title">Signal Strength</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/events"            class="chart-link"><span class="cl-title">Temperature Events</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/process-stats"     class="chart-link"><span class="cl-title">Process Stats</span><span class="cl-arrow">&#8594;</span></a>
-    <a href="/camera"            class="chart-link"><span class="cl-title">Camera Zones</span><span class="cl-arrow">&#8594;</span></a>
+    <a href="/camera"            class="chart-link"><span class="cl-title">Cameras</span><span class="cl-arrow">&#8594;</span></a>
     <a href="/garage"            class="chart-link"><span class="cl-title">Garage Door</span><span class="cl-arrow">&#8594;</span></a>
   </div>
 
@@ -2918,6 +2918,174 @@ def api_cameras():
     from smart_home import camera as _camera
     cameras = _camera.load_config()
     return jsonify([{"name": c["name"], "zones": c.get("zones", [])} for c in cameras])
+
+
+@app.get("/api/camera/events/<name>")
+def api_camera_events(name):
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT ts, zone, pct FROM camera_events WHERE camera=? ORDER BY ts DESC LIMIT 100",
+            (name,),
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+_CAMERA_VIEW_PAGE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cameras &mdash; Smart Home</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f4f8; color: #1a2535; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; color: #1a2535; letter-spacing: -.02em; }
+    .nav { margin-bottom: 1.2rem; display: flex; gap: 1.2rem; align-items: center; }
+    .nav a { font-size: .85rem; color: #2e7dd4; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+    .cam-tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .cam-tab { background: #fff; color: #4a6080; border: 1px solid #d0dce8; border-radius: 6px;
+               padding: .35rem 1rem; cursor: pointer; font-size: .85rem; font-weight: 500; transition: all .15s; }
+    .cam-tab:hover { background: #f0f4f8; }
+    .cam-tab.active { background: #e07820; color: #fff; border-color: #e07820; }
+    .panel { background: #fff; border-radius: 12px; padding: 1.2rem;
+             box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); margin-bottom: 1.2rem; }
+    .feed-wrap { position: relative; }
+    .feed-wrap img { display: block; max-width: 100%; border-radius: 6px; }
+    .feed-actions { margin-top: .8rem; display: flex; gap: .8rem; align-items: center; }
+    .btn { padding: .38rem 1.1rem; border-radius: 6px; border: 1px solid #d0dce8; background: #fff;
+           color: #4a6080; font-size: .85rem; font-weight: 500; cursor: pointer; transition: all .15s;
+           text-decoration: none; display: inline-block; }
+    .btn:hover { background: #f0f4f8; }
+    .btn.primary { background: #2e7dd4; color: #fff; border-color: #2e7dd4; }
+    .btn.primary:hover { background: #2568b8; }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #c0392b;
+                display: inline-block; margin-right: .4rem; animation: blink 1.2s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .section-title { font-size: .75rem; color: #7a90a8; text-transform: uppercase;
+                     letter-spacing: .07em; font-weight: 600; margin-bottom: .8rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    th { text-align: left; color: #7a90a8; font-size: .72rem; text-transform: uppercase;
+         letter-spacing: .06em; font-weight: 600; padding: .4rem .6rem; border-bottom: 1px solid #e8eef4; }
+    td { padding: .5rem .6rem; border-bottom: 1px solid #f0f4f8; color: #4a6080; }
+    td:first-child { color: #1a2535; }
+    tr:last-child td { border-bottom: none; }
+    .empty { color: #7a90a8; font-size: .85rem; }
+    #no-cameras { color: #7a90a8; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Cameras</h1>
+  <div class="nav">
+    <a href="/">&larr; Dashboard</a>
+    <a href="/camera/zones" id="zones-link" style="display:none">Edit Zones &rarr;</a>
+  </div>
+  <div class="cam-tabs" id="cam-tabs"></div>
+  <div id="no-cameras" style="display:none">
+    No cameras configured. Run <code>smart-home configure-camera</code> on the server.
+  </div>
+  <div id="main" style="display:none">
+    <div class="panel">
+      <div class="feed-wrap">
+        <img id="feed" src="" alt="Camera feed">
+      </div>
+      <div class="feed-actions">
+        <span><span class="live-dot"></span>Live</span>
+        <button class="btn" onclick="toggleLive()">Pause</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="section-title">Recent Motion Events</div>
+      <div id="events-wrap"><p class="empty">Loading&hellip;</p></div>
+    </div>
+  </div>
+
+<script>
+let cameras = [], activeCam = null, liveInterval = null, live = true;
+
+function fmtDt(ts) {
+  return new Date(ts).toLocaleString(undefined, {month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'});
+}
+
+function toggleLive() {
+  live = !live;
+  document.querySelector(".feed-actions button").textContent = live ? "Pause" : "Resume";
+  if (live) startLive(); else { clearInterval(liveInterval); liveInterval = null; }
+}
+
+function startLive() {
+  clearInterval(liveInterval);
+  refreshFrame();
+  liveInterval = setInterval(refreshFrame, 2000);
+}
+
+function refreshFrame() {
+  if (!activeCam) return;
+  document.getElementById("feed").src =
+    `/api/camera/snapshot/${encodeURIComponent(activeCam)}?t=${Date.now()}`;
+}
+
+async function loadEvents() {
+  if (!activeCam) return;
+  const data = await fetch(`/api/camera/events/${encodeURIComponent(activeCam)}`).then(r => r.json());
+  const wrap = document.getElementById("events-wrap");
+  if (!data.length) {
+    wrap.innerHTML = '<p class="empty">No motion events recorded yet.</p>';
+    return;
+  }
+  wrap.innerHTML = `<table>
+    <thead><tr><th>Time</th><th>Zone</th><th>Changed</th></tr></thead>
+    <tbody>${data.map(e => `<tr>
+      <td>${fmtDt(e.ts)}</td>
+      <td>${e.zone}</td>
+      <td>${e.pct != null ? e.pct.toFixed(1) + "%" : "—"}</td>
+    </tr>`).join("")}</tbody>
+  </table>`;
+}
+
+function switchCam(name) {
+  activeCam = name;
+  document.querySelectorAll(".cam-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.cam === name));
+  document.getElementById("zones-link").href = `/camera/zones?cam=${encodeURIComponent(name)}`;
+  document.getElementById("main").style.display = "";
+  live = true;
+  document.querySelector(".feed-actions button").textContent = "Pause";
+  startLive();
+  loadEvents();
+  setInterval(loadEvents, 30000);
+}
+
+async function init() {
+  const data = await fetch("/api/cameras").then(r => r.json());
+  cameras = data;
+  if (!cameras.length) {
+    document.getElementById("no-cameras").style.display = "";
+    return;
+  }
+  document.getElementById("zones-link").style.display = "";
+  const tabs = document.getElementById("cam-tabs");
+  tabs.innerHTML = cameras.map(c =>
+    `<button class="cam-tab" data-cam="${c.name}" onclick="switchCam('${c.name()}')">${c.name}</button>`
+  ).join("");
+  // Fix: use proper escaping
+  tabs.innerHTML = "";
+  cameras.forEach(c => {
+    const btn = document.createElement("button");
+    btn.className = "cam-tab";
+    btn.dataset.cam = c.name;
+    btn.textContent = c.name;
+    btn.onclick = () => switchCam(c.name);
+    tabs.appendChild(btn);
+  });
+  switchCam(cameras[0].name);
+}
+
+init();
+</script>
+</body>
+</html>"""
 
 
 _CAMERA_PAGE = """\
@@ -3263,6 +3431,11 @@ init();
 
 @app.get("/camera")
 def camera_page():
+    return Response(_CAMERA_VIEW_PAGE, mimetype="text/html")
+
+
+@app.get("/camera/zones")
+def camera_zones_page():
     return Response(_CAMERA_PAGE, mimetype="text/html")
 # Garage door
 # ---------------------------------------------------------------------------
