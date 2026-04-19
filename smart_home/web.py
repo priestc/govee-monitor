@@ -1359,9 +1359,9 @@ function applyBtnColor(btn, color, active) {
   if (active) {
     btn.style.background = color; btn.style.borderColor = color; btn.style.color = '#fff';
   } else {
-    btn.style.background = `rgba(${r},${g},${b},0.1)`;
-    btn.style.borderColor = `rgba(${r},${g},${b},0.35)`;
-    btn.style.color = color;
+    btn.style.background = `rgba(${r},${g},${b},0.06)`;
+    btn.style.borderColor = `rgba(${r},${g},${b},0.2)`;
+    btn.style.color = '#7a90a8';
   }
 }
 let mode = "recent", rangeDays = 1, activeMonth = null, activeDay = null, offsetMs = 0;
