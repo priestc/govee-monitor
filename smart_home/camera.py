@@ -25,7 +25,26 @@ def save_config(cameras: list[dict]) -> None:
         json.dump(cameras, f, indent=2)
 
 
-def get_snapshot_jpeg(base_url: str, snapshot_path: str = "/snapshot") -> tuple[bytes | None, str | None]:
+_ROTATION_CODES = {
+    90:  "ROTATE_90_CLOCKWISE",
+    180: "ROTATE_180",
+    270: "ROTATE_90_COUNTERCLOCKWISE",
+}
+
+def rotate_jpeg(jpeg_bytes: bytes, degrees: int) -> bytes:
+    """Rotate a JPEG by 0/90/180/270 degrees. Returns original bytes if degrees==0."""
+    if degrees == 0 or degrees not in _ROTATION_CODES:
+        return jpeg_bytes
+    import cv2
+    import numpy as np
+    buf = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    rotated = cv2.rotate(img, getattr(cv2, _ROTATION_CODES[degrees]))
+    _, enc = cv2.imencode('.jpg', rotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return enc.tobytes()
+
+
+def get_snapshot_jpeg(base_url: str, snapshot_path: str = "/snapshot", rotation: int = 0) -> tuple[bytes | None, str | None]:
     """Fetch a JPEG from GET <base_url><snapshot_path>.
 
     Returns (jpeg_bytes, None) on success or (None, error_message) on failure.
@@ -34,7 +53,7 @@ def get_snapshot_jpeg(base_url: str, snapshot_path: str = "/snapshot") -> tuple[
     try:
         r = httpx.get(f"{base_url.rstrip('/')}{snapshot_path}", timeout=5.0)
         r.raise_for_status()
-        return r.content, None
+        return rotate_jpeg(r.content, rotation), None
     except Exception as e:
         return None, str(e)
 
@@ -60,6 +79,7 @@ class CameraWatcher:
         self.name: str = camera["name"]
         self.base_url: str = camera["url"].rstrip("/")
         self.snapshot_path: str = camera.get("snapshot_path", "/snapshot")
+        self.rotation: int = int(camera.get("rotation", 0))
         self.zones: list[dict] = list(camera.get("zones", []))
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -80,6 +100,10 @@ class CameraWatcher:
     def update_zones(self, zones: list[dict]) -> None:
         """Hot-reload zones without restarting the thread."""
         self.zones = list(zones)
+
+    def update_rotation(self, degrees: int) -> None:
+        """Hot-reload rotation without restarting the thread."""
+        self.rotation = degrees
 
     def _run(self) -> None:
         try:
@@ -105,6 +129,8 @@ class CameraWatcher:
                 frame = cv2.imdecode(buf, cv2.IMREAD_COLOR)
                 if frame is None:
                     raise ValueError("JPEG decode returned None")
+                if self.rotation and self.rotation in _ROTATION_CODES:
+                    frame = cv2.rotate(frame, getattr(cv2, _ROTATION_CODES[self.rotation]))
             except Exception as e:
                 self.events.put(("error", f"Snapshot failed for {self.name}: {e}"))
                 self._stop.wait(self.RECONNECT_WAIT)

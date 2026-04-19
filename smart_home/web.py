@@ -2906,10 +2906,24 @@ def api_camera_snapshot(name):
     cam = next((c for c in cameras if c["name"] == name), None)
     if cam is None:
         return ("Camera not found", 404)
-    jpeg, err = _camera.get_snapshot_jpeg(cam["url"], cam.get("snapshot_path", "/snapshot"))
+    jpeg, err = _camera.get_snapshot_jpeg(
+        cam["url"], cam.get("snapshot_path", "/snapshot"), cam.get("rotation", 0)
+    )
     if jpeg is None:
         return (f"Could not grab frame: {err}", 502)
     return Response(jpeg, mimetype="image/jpeg")
+
+
+@app.post("/api/camera/rotate/<name>")
+def api_camera_rotate(name):
+    from smart_home import camera as _camera
+    cameras = _camera.load_config()
+    cam = next((c for c in cameras if c["name"] == name), None)
+    if cam is None:
+        return ("Camera not found", 404)
+    cam["rotation"] = (cam.get("rotation", 0) + 90) % 360
+    _camera.save_config(cameras)
+    return jsonify({"rotation": cam["rotation"]})
 
 
 @app.get("/api/camera/zones/<name>")
@@ -3065,6 +3079,7 @@ _CAMERA_VIEW_PAGE = """\
       <div class="feed-actions">
         <span><span class="live-dot"></span>Live</span>
         <button class="btn" onclick="toggleLive()">Pause</button>
+        <button class="btn" onclick="rotateCam()">Rotate 90°</button>
       </div>
     </div>
     <div class="panel">
@@ -3112,6 +3127,12 @@ function refreshFrame() {
   if (!activeCam) return;
   document.getElementById("feed").src =
     `/api/camera/snapshot/${encodeURIComponent(activeCam)}?t=${Date.now()}`;
+}
+
+async function rotateCam() {
+  if (!activeCam) return;
+  await fetch(`/api/camera/rotate/${encodeURIComponent(activeCam)}`, { method: "POST" });
+  refreshFrame();
 }
 
 async function loadEvents() {
