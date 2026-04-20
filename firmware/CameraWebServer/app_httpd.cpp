@@ -27,31 +27,6 @@
 
 #include "driver/temperature_sensor.h" // Note the 'ure' in temperature
 
-esp_err_t temp_handler(httpd_req_t *req){
-    float tsens_out = 0.0;
-    temperature_sensor_handle_t temp_sensor = NULL;
-    temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
-
-    // Initialize and read the sensor
-    esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor);
-    if (err == ESP_OK) {
-        temperature_sensor_enable(temp_sensor);
-        temperature_sensor_get_celsius(temp_sensor, &tsens_out);
-        temperature_sensor_disable(temp_sensor);
-        temperature_sensor_uninstall(temp_sensor);
-    }
-
-    // Convert to a safe string
-    String ts = String(tsens_out, 2); 
-    
-    // Set standard HTTP headers correctly
-    httpd_resp_set_status(req, "200 OK");      // Explicitly set the 200 OK status
-    httpd_resp_set_type(req, "text/plain");    // Ensure the browser knows this is text
-    httpd_resp_set_hdr(req, "Connection", "close"); // Standard connection management
-
-    // Send the final compliant response
-    return httpd_resp_send(req, ts.c_str(), ts.length());
-}
 
 esp_err_t vitals_handler(httpd_req_t *req) {
     float tsens_out = 0.0;
@@ -736,13 +711,6 @@ void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.max_uri_handlers = 16;
 
-  httpd_uri_t temp_uri = {
-    .uri       = "/temp",
-    .method    = HTTP_GET,
-    .handler   = temp_handler,
-    .user_ctx  = NULL
-  };
-
   httpd_uri_t vitals_uri = {
     .uri       = "/vitals",
     .method    = HTTP_GET,
@@ -908,7 +876,6 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &greg_uri);
     httpd_register_uri_handler(camera_httpd, &pll_uri);
     httpd_register_uri_handler(camera_httpd, &win_uri);
-    httpd_register_uri_handler(camera_httpd, &temp_uri);
     httpd_register_uri_handler(camera_httpd, &vitals_uri);
   }
 
