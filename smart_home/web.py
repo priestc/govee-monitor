@@ -2980,7 +2980,7 @@ def api_camera_vitals(name):
     days = request.args.get("days", 1, type=float)
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT ts, temp_c, wifi_rssi, free_heap_kb FROM camera_vitals WHERE camera=? AND ts >= datetime('now', ?) ORDER BY ts ASC",
+            "SELECT ts, temp_c, wifi_rssi, free_heap_kb FROM camera_vitals WHERE camera=? AND ts >= datetime('now', 'localtime', ?) ORDER BY ts ASC",
             (name, f"-{days} days"),
         ).fetchall()
     return jsonify([dict(r) for r in rows])
