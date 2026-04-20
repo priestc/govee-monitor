@@ -45,13 +45,19 @@ esp_err_t vitals_handler(httpd_req_t *req) {
     uint32_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     int8_t rssi = WiFi.RSSI();
     uint32_t uptime_sec = millis() / 1000;
+    bool detected = psramFound();
+    size_t total = ESP.getPsramSize();
+    size_t free_now = ESP.getFreePsram();
 
     String json = "{";
     json += "\"uptime_s\":" + String(uptime_sec) + ",";
     json += "\"temperature_c\":" + String(tsens_out, 2) + ",";
     json += "\"wifi_rssi_dbm\":" + String(rssi) + ",";
     json += "\"free_heap_kb\":" + String(free_heap / 1024) + ",";
-    json += "\"free_psram_kb\":" + String(free_psram / 1024);
+    json += "\"free_psram_kb\":" + String(free_psram / 1024) + ",";
+    json += "\"psram_detected\":" + String(detected) + ",";
+    json += "\"psram_total_kb\":" + String(total / 1024) + ",";
+    json += "\"psram_free_kb\":" + String(free_now / 1024);
     json += "}";
 
     httpd_resp_set_status(req, "200 OK");
