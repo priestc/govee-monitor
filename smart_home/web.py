@@ -2980,7 +2980,7 @@ def api_camera_vitals(name):
     days = request.args.get("days", 1, type=float)
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT ts, temp_c, wifi_rssi, free_heap_kb FROM camera_vitals WHERE camera=? AND ts >= datetime('now', 'localtime', ?) ORDER BY ts ASC",
+            "SELECT ts, temp_c, wifi_rssi, free_heap_kb, uptime_s, psram_total_kb FROM camera_vitals WHERE camera=? AND ts >= datetime('now', 'localtime', ?) ORDER BY ts ASC",
             (name, f"-{days} days"),
         ).fetchall()
     return jsonify([dict(r) for r in rows])
@@ -3108,6 +3108,10 @@ _CAMERA_VIEW_PAGE = """\
       <canvas id="chart-rssi" height="80"></canvas>
       <div style="font-size:.72rem;color:#7a90a8;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin:.9rem 0 .3rem">Free Heap (KB)</div>
       <canvas id="chart-heap" height="80"></canvas>
+      <div style="font-size:.72rem;color:#7a90a8;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin:.9rem 0 .3rem">Uptime (seconds)</div>
+      <canvas id="chart-uptime" height="80"></canvas>
+      <div style="font-size:.72rem;color:#7a90a8;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin:.9rem 0 .3rem">PSRAM Total (KB)</div>
+      <canvas id="chart-psram" height="80"></canvas>
     </div>
   </div>
 
@@ -3220,15 +3224,19 @@ async function loadVitals(days) {
   if (!data.length) { panel.style.display = "none"; return; }
   panel.style.display = "";
   if (!vitalsCharts.temp) {
-    vitalsCharts.temp = makeVitalsChart("chart-temp", "#e07820");
-    vitalsCharts.rssi = makeVitalsChart("chart-rssi", "#2e7dd4");
-    vitalsCharts.heap = makeVitalsChart("chart-heap", "#2a9d6e");
+    vitalsCharts.temp   = makeVitalsChart("chart-temp",   "#e07820");
+    vitalsCharts.rssi   = makeVitalsChart("chart-rssi",   "#2e7dd4");
+    vitalsCharts.heap   = makeVitalsChart("chart-heap",   "#2a9d6e");
+    vitalsCharts.uptime = makeVitalsChart("chart-uptime", "#9b4dca");
+    vitalsCharts.psram  = makeVitalsChart("chart-psram",  "#c0392b");
   }
   const now = new Date();
   const minTime = new Date(now - vitalsRangeDays * 86400000);
-  vitalsCharts.temp.data.datasets[0].data = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.temp_c }));
-  vitalsCharts.rssi.data.datasets[0].data = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.wifi_rssi }));
-  vitalsCharts.heap.data.datasets[0].data = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.free_heap_kb }));
+  vitalsCharts.temp.data.datasets[0].data   = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.temp_c }));
+  vitalsCharts.rssi.data.datasets[0].data   = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.wifi_rssi }));
+  vitalsCharts.heap.data.datasets[0].data   = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.free_heap_kb }));
+  vitalsCharts.uptime.data.datasets[0].data = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.uptime_s }));
+  vitalsCharts.psram.data.datasets[0].data  = data.map(r => ({ x: new Date(r.ts.replace(' ', 'T')), y: r.psram_total_kb }));
   Object.values(vitalsCharts).forEach(c => {
     c.options.scales.x.min = minTime;
     c.options.scales.x.max = now;

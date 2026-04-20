@@ -1542,17 +1542,18 @@ def monitor(duration, verbose, db, no_db):
                         r.raise_for_status()
                         return r.json()
                     data = await asyncio.get_event_loop().run_in_executor(None, _fetch)
-                    temp_c    = data.get("temperature_c")
-                    wifi_rssi = data.get("wifi_rssi_dbm")
-                    free_heap = data.get("free_heap_kb")
-                    uptime_s  = data.get("uptime_s")
+                    temp_c      = data.get("temperature_c")
+                    wifi_rssi   = data.get("wifi_rssi_dbm")
+                    free_heap   = data.get("free_heap_kb")
+                    uptime_s    = data.get("uptime_s")
+                    psram_total = data.get("psram_total_kb")
                     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     log_ts = datetime.datetime.now().strftime("%H:%M:%S")
-                    click.echo(f"[{log_ts}] Camera vitals {cam['name']}: {temp_c}°C  RSSI={wifi_rssi}dBm  heap={free_heap}KB  uptime={uptime_s}s")
+                    click.echo(f"[{log_ts}] Camera vitals {cam['name']}: {temp_c}°C  RSSI={wifi_rssi}dBm  heap={free_heap}KB  uptime={uptime_s}s  psram={psram_total}KB")
                     if conn:
                         conn.execute(
-                            "INSERT INTO camera_vitals (ts, camera, temp_c, wifi_rssi, free_heap_kb, uptime_s) VALUES (?,?,?,?,?,?)",
-                            (ts, cam["name"], temp_c, wifi_rssi, free_heap, uptime_s),
+                            "INSERT INTO camera_vitals (ts, camera, temp_c, wifi_rssi, free_heap_kb, uptime_s, psram_total_kb) VALUES (?,?,?,?,?,?,?)",
+                            (ts, cam["name"], temp_c, wifi_rssi, free_heap, uptime_s, psram_total),
                         )
                         conn.commit()
                 except Exception as e:

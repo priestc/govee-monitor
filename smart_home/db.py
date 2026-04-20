@@ -83,16 +83,23 @@ def open_db(path: str) -> sqlite3.Connection:
         pass  # column already exists
     conn.execute("""
         CREATE TABLE IF NOT EXISTS camera_vitals (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts           TEXT NOT NULL,
-            camera       TEXT NOT NULL,
-            temp_c       REAL,
-            wifi_rssi    INTEGER,
-            free_heap_kb INTEGER,
-            uptime_s     INTEGER
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts             TEXT NOT NULL,
+            camera         TEXT NOT NULL,
+            temp_c         REAL,
+            wifi_rssi      INTEGER,
+            free_heap_kb   INTEGER,
+            uptime_s       INTEGER,
+            psram_total_kb INTEGER
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS camera_vitals_camera_ts ON camera_vitals (camera, ts DESC)")
+    # Migrate: add psram_total_kb column to existing DBs
+    try:
+        conn.execute("ALTER TABLE camera_vitals ADD COLUMN psram_total_kb INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     return conn
 
