@@ -75,6 +75,7 @@ class CameraWatcher:
     FRAME_INTERVAL  = 0.1  # seconds between snapshot requests (~10 fps)
     RECONNECT_WAIT  = 10   # seconds to wait after a fetch failure
     WARMUP_SECONDS  = 30   # suppress motion events after connect/reconnect
+    MIN_CONTOUR_PX  = 500  # minimum contour area in pixels to count as real motion
 
     def __init__(self, camera: dict):
         self.name: str = camera["name"]
@@ -150,6 +151,14 @@ class CameraWatcher:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             fgmask = fgbg.apply(gray)
 
+            # Build a filtered foreground mask: only keep pixels belonging to
+            # contours large enough to be a real object (not noise/insects/artifacts)
+            contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            filtered_mask = np.zeros_like(fgmask)
+            for cnt in contours:
+                if cv2.contourArea(cnt) >= self.MIN_CONTOUR_PX:
+                    cv2.drawContours(filtered_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+
             for zone in zones:
                 zname = zone["name"]
                 threshold = float(zone.get("sensitivity", 0.05))
@@ -163,7 +172,7 @@ class CameraWatcher:
                     total = int(np.count_nonzero(mask))
                     if total == 0:
                         continue
-                    roi_pixels = int(np.count_nonzero(fgmask & mask))
+                    roi_pixels = int(np.count_nonzero(filtered_mask & mask))
                     pct = roi_pixels / total
                 else:
                     # Legacy rectangle support
@@ -171,7 +180,7 @@ class CameraWatcher:
                     y1 = max(0, int(zone.get("y", 0) * h))
                     x2 = min(w, int((zone.get("x", 0) + zone.get("width", 1)) * w))
                     y2 = min(h, int((zone.get("y", 0) + zone.get("height", 1)) * h))
-                    roi = fgmask[y1:y2, x1:x2]
+                    roi = filtered_mask[y1:y2, x1:x2]
                     if roi.size == 0:
                         continue
                     pct = float(np.count_nonzero(roi)) / roi.size
