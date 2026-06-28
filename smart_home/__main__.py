@@ -2421,6 +2421,8 @@ def monitor(duration, verbose, db, no_db):
 
     garages_cfg = _garage.load_config()
     _door_states: dict[str, bool | None] = {}  # name -> door_closed (True=closed, False=open)
+    _door_opened_at: dict[str, datetime.datetime] = {}   # name -> when door transitioned to open
+    _door_open_alerted_at: dict[str, datetime.datetime] = {}  # name -> last "still open" alert sent
     if conn:
         for g in garages_cfg:
             row = conn.execute(
@@ -2455,6 +2457,26 @@ def monitor(duration, verbose, db, no_db):
                         )
                         conn.commit()
                         click.echo(f"[{log_ts}] Garage '{name}': {state_str}")
+                        if door_closed is False:
+                            _door_opened_at[name] = now
+                            _door_open_alerted_at.pop(name, None)
+                        else:
+                            _door_opened_at.pop(name, None)
+                            _door_open_alerted_at.pop(name, None)
+
+                    # Hourly "still open" alert after the door has been open > 1 hour
+                    if _door_states.get(name) is False and name in _door_opened_at:
+                        open_duration = now - _door_opened_at[name]
+                        if open_duration >= datetime.timedelta(hours=1):
+                            last_alert = _door_open_alerted_at.get(name)
+                            if last_alert is None or (now - last_alert) >= datetime.timedelta(hours=1):
+                                hours_open = int(open_duration.total_seconds() // 3600)
+                                _push.send_notification(
+                                    title="Garage door still open",
+                                    body=f"'{name}' has been open for {hours_open} hour{'s' if hours_open != 1 else ''}",
+                                )
+                                _door_open_alerted_at[name] = now
+                                click.echo(f"[{log_ts}] Sent open-door alert for '{name}' ({hours_open}h open)")
                 except Exception as e:
                     click.echo(f"[{log_ts}] Garage poll failed for '{name}': {e}")
             await asyncio.sleep(15)
