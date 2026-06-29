@@ -1492,8 +1492,17 @@ def monitor(duration, verbose, db, no_db):
     IPHONE_NET_TIMEOUT = datetime.timedelta(seconds=30)
 
     # In-memory last-seen timestamps; keyed by device name.
+    # Seeded from saved state so a service restart doesn't falsely mark devices away.
     iphone_ble_last_seen: dict[str, datetime.datetime] = {}
     iphone_net_last_seen: dict[str, datetime.datetime] = {}
+    for _sname, _sentry in _saved_status.items():
+        for _key, _dest in (("ble_last_seen", iphone_ble_last_seen), ("net_last_seen", iphone_net_last_seen)):
+            _ts = _sentry.get(_key)
+            if _ts:
+                try:
+                    _dest[_sname] = datetime.datetime.fromisoformat(_ts)
+                except ValueError:
+                    pass
 
     # {bluetooth_name: device_name} — rebuilt whenever devices are reloaded.
     # Allows on_device() to match BLE advertisements to registered iPhones.
@@ -1755,7 +1764,7 @@ def monitor(duration, verbose, db, no_db):
                     entry = dict(entry)
                     entry["name"] = name
                     entry["status"] = new_status
-                    entry["last_seen"] = max(candidates).isoformat() if candidates else None
+                    entry["last_seen"] = max(candidates).isoformat() if candidates else entry.get("last_seen")
                     entry["ble_last_seen"] = new_ble_last
                     entry["net_last_seen"] = new_net_last
                     state[name] = entry

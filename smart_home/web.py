@@ -746,7 +746,7 @@ def presence_history_api():
                 "duration_secs": round((e - s).total_seconds()),
             }
             for s, e, st in _periods(dev_entries, now - _datetime.timedelta(days=90))
-            if st == "away"
+            if st == "away" and (e - s).total_seconds() >= 600
         ]
         result.append({
             "name":          name,
