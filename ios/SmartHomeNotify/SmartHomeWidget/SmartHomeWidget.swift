@@ -9,6 +9,25 @@ struct SensorReading: Codable, Identifiable {
     let address: String?
     let temp_f: Double?
     let humidity: Double?
+    let ts: String?
+}
+
+// Matches the OFFLINE_MS threshold used by the web dashboard (smart_home/web.py).
+private let offlineThreshold: TimeInterval = 10 * 60
+
+private let sensorTimestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    formatter.timeZone = .current
+    return formatter
+}()
+
+private func isOnline(_ sensor: SensorReading) -> Bool {
+    guard let ts = sensor.ts, let date = sensorTimestampFormatter.date(from: ts) else {
+        return false
+    }
+    return Date().timeIntervalSince(date) < offlineThreshold
 }
 
 // MARK: - Timeline Entry
@@ -27,8 +46,8 @@ struct SmartHomeProvider: TimelineProvider {
 
     func placeholder(in context: Context) -> SmartHomeEntry {
         SmartHomeEntry(date: Date(), sensors: [
-            SensorReading(label: "outside-shade", address: "", temp_f: 72.4, humidity: 45.1),
-            SensorReading(label: "inside-office", address: "", temp_f: 75.8, humidity: 36.2),
+            SensorReading(label: "outside-shade", address: "", temp_f: 72.4, humidity: 45.1, ts: nil),
+            SensorReading(label: "inside-office", address: "", temp_f: 75.8, humidity: 36.2, ts: nil),
         ], error: nil, debugURL: nil)
     }
 
@@ -58,7 +77,7 @@ struct SmartHomeProvider: TimelineProvider {
         let req = URLRequest(url: url, timeoutInterval: 10)
         URLSession.shared.dataTask(with: req) { data, response, error in
             if let data, let sensors = try? JSONDecoder().decode([SensorReading].self, from: data) {
-                completion(SmartHomeEntry(date: Date(), sensors: sensors, error: nil, debugURL: nil))
+                completion(SmartHomeEntry(date: Date(), sensors: sensors.filter(isOnline), error: nil, debugURL: nil))
             } else {
                 let httpStatus = (response as? HTTPURLResponse).map { "HTTP \($0.statusCode)" } ?? "no response"
                 let errMsg = error?.localizedDescription ?? "decode failed"
@@ -174,8 +193,8 @@ struct SmartHomeWidget: Widget {
     SmartHomeWidget()
 } timeline: {
     SmartHomeEntry(date: Date(), sensors: [
-        SensorReading(label: "outside-shade", address: "", temp_f: 72.4, humidity: 45.1),
-        SensorReading(label: "outside-sun",   address: "", temp_f: 80.2, humidity: 38.7),
-        SensorReading(label: "inside-office", address: "", temp_f: 75.8, humidity: 36.2),
+        SensorReading(label: "outside-shade", address: "", temp_f: 72.4, humidity: 45.1, ts: nil),
+        SensorReading(label: "outside-sun",   address: "", temp_f: 80.2, humidity: 38.7, ts: nil),
+        SensorReading(label: "inside-office", address: "", temp_f: 75.8, humidity: 36.2, ts: nil),
     ], error: nil, debugURL: nil)
 }

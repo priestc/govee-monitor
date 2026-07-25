@@ -6,6 +6,21 @@ import Darwin
 private let appGroupDefaults = UserDefaults(suiteName: "group.io.github.priestc.SmartHomeNotify")!
 
 struct ContentView: View {
+    var body: some View {
+        TabView {
+            GarageDoorsView()
+                .tabItem {
+                    Label("Garage Doors", systemImage: "door.garage.closed")
+                }
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gear")
+                }
+        }
+    }
+}
+
+struct SettingsView: View {
     @AppStorage("localURL",     store: appGroupDefaults) private var localURL     = ""
     @AppStorage("tailscaleURL", store: appGroupDefaults) private var tailscaleURL = ""
     @AppStorage("presenceName") private var presenceName = ""
