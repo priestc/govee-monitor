@@ -5152,14 +5152,6 @@ def index():
     .card.offline { opacity: .65; }
     .card.offline .temp { font-size: 1.4rem; color: #aabbc8; }
     .sun-time { font-size: 2.4rem; font-weight: 700; margin: .2rem 0 .1rem; line-height: 1; font-variant-numeric: tabular-nums; }
-    .presence-cards { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
-    .presence-card { background: #fff; border-radius: 12px; padding: 1rem 1.5rem; min-width: 160px; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.05); display: flex; align-items: center; gap: .9rem; }
-    .presence-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
-    .presence-dot.home { background: #2a9d6e; }
-    .presence-dot.away { background: #c0392b; }
-    .presence-dot.unknown { background: #aabbc8; }
-    .presence-info .name { font-size: .85rem; font-weight: 600; color: #1a2535; }
-    .presence-info .status { font-size: .75rem; color: #7a90a8; margin-top: .15rem; }
     .section-title { font-size: .75rem; color: #7a90a8; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-bottom: .75rem; }
     .events-list { display: flex; flex-direction: column; gap: .4rem; margin-bottom: 2rem; }
     .ev-row { background: #fff; border-radius: 10px; padding: .65rem 1.1rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); display: flex; align-items: center; gap: .75rem; }
@@ -5204,7 +5196,6 @@ def index():
     <div id="sun-widget"></div>
     <div class="garage-cards" id="garage-cards" style="margin-bottom:0"></div>
   </div>
-  <div class="presence-cards" id="presence-cards"></div>
   <div class="pool-cards"    id="pool-cards"    style="display:none"></div>
 
   <div class="section-title">Charts</div>
@@ -5276,24 +5267,6 @@ async function loadCurrent() {
       }
     }).join("");
   } catch(e) { showError("sensors"); }
-}
-async function loadPresence() {
-  try {
-    const data = await fetchJSON("/api/presence");
-    const el = document.getElementById("presence-cards");
-    if (!data.length) { el.innerHTML = ""; return; }
-    el.innerHTML = data.map(d => {
-      const ago = d.last_seen ? timeSince(new Date(d.last_seen)) : "never";
-      return `<a href="/presence" class="presence-card" style="text-decoration:none;color:inherit">
-        <div class="presence-dot ${d.status}"></div>
-        <div class="presence-info">
-          <div class="name">${d.name}</div>
-          ${d.model_name ? `<div class="status" style="color:#4a6080;font-weight:500">${d.model_name}</div>` : ''}
-          <div class="status">${d.status} &middot; ${ago}</div>
-        </div>
-      </a>`;
-    }).join("");
-  } catch(e) { showError("presence"); }
 }
 function timeSince(date) {
   const s = Math.floor((Date.now() - date) / 1000);
@@ -5458,13 +5431,11 @@ async function loadSunTimes() {
   } catch(e) { /* property not configured — skip sun widget */ }
 }
 loadCurrent();
-loadPresence();
 loadEvents();
 loadGarage();
 loadPool();
 loadSunTimes();
 setInterval(loadCurrent, 30000);
-setInterval(loadPresence, 30000);
 setInterval(loadEvents, 60000);
 setInterval(loadGarage, 15000);
 setInterval(loadPool, 60000);

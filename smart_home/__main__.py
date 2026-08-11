@@ -1479,6 +1479,15 @@ def monitor(duration, verbose, db, no_db):
         _garage.load_auto_closed() if _anyone_away else set()
     )
 
+    # Doors currently in an active presence-tracking window: opened (likely a
+    # departure) and not yet reopened (a return). Active iPhone pinging
+    # (check_iphone_network / check_iphone_bluetooth) only runs while this set
+    # is non-empty — that's the only time we actually need to know where the
+    # phone is — so the phone isn't pinged 24/7 just to sit idle at home.
+    # Seeded from _auto_closed_doors: those doors are, by definition, closed
+    # and waiting for a return, so tracking should resume for them too.
+    _ping_active_doors: set[str] = set(_auto_closed_doors)
+
     # Timestamp of when each door was last auto-opened on arrival.
     # Auto-close is suppressed for 10 minutes after an auto-open so that a brief
     # connectivity drop while pulling into the garage doesn't immediately close it.
@@ -1612,11 +1621,29 @@ def monitor(duration, verbose, db, no_db):
                 ts = datetime.datetime.now().strftime("%H:%M:%S")
                 click.echo(f"[{ts}] Verify-close check failed for '{door_name}': {e}")
 
+    def _seed_presence_tracking(presence_device: str | None) -> None:
+        """Mark relevant device(s) as 'seen now' when a tracking window opens.
+
+        Without this, resuming pinging after a long idle period would see a
+        stale last-seen timestamp, time out immediately, and misreport the
+        person as 'away' the instant they open the door to leave.
+        """
+        now = datetime.datetime.now()
+        names = [presence_device] if presence_device else list(_iphone_devices_cache.keys())
+        for n in names:
+            iphone_ble_last_seen[n] = now
+            iphone_net_last_seen[n] = now
+
     async def check_iphone_network():
-        """Ping each registered iPhone's local IP every 10s; update iphone_net_last_seen."""
+        """Ping each registered iPhone's local IP every 10s, but only while a
+        garage door is open and we're waiting to detect departure/return
+        (see _ping_active_doors); idle otherwise to avoid draining battery."""
         import subprocess as _sp
         loop = asyncio.get_running_loop()
         while True:
+            if not _ping_active_doors:
+                await asyncio.sleep(5)
+                continue
             # Reload and refresh the BLE name map in case devices changed.
             _iphone_devices_cache.clear()
             _iphone_devices_cache.update(_presence.load_iphone_devices())
@@ -1679,6 +1706,9 @@ def monitor(duration, verbose, db, no_db):
             return None
 
         while True:
+            if not _ping_active_doors:
+                await asyncio.sleep(5)
+                continue
             try:
                 paired = await loop.run_in_executor(None, _get_paired_macs)
                 for dev_name, info in list(_iphone_devices_cache.items()):
@@ -1702,6 +1732,8 @@ def monitor(duration, verbose, db, no_db):
         """Mark devices home/away based on BLE + network signals; away only when both absent."""
         while True:
             await asyncio.sleep(15)
+            if not _ping_active_doors:
+                continue
             now = datetime.datetime.now()
             if not _iphone_devices_cache:
                 continue
@@ -2469,6 +2501,18 @@ def monitor(duration, verbose, db, no_db):
                         if door_closed is False:
                             _door_opened_at[name] = now
                             _door_open_alerted_at.pop(name, None)
+                            # Toggle the presence-tracking window for auto doors:
+                            # first open after idle = likely departure, start
+                            # tracking; the next open (after an auto-close) =
+                            # the return, stop tracking.
+                            if g.get("auto"):
+                                if name in _ping_active_doors:
+                                    _ping_active_doors.discard(name)
+                                    click.echo(f"[{log_ts}] Presence tracking stopped — '{name}' reopened")
+                                else:
+                                    _ping_active_doors.add(name)
+                                    _seed_presence_tracking(g.get("presence_device"))
+                                    click.echo(f"[{log_ts}] Presence tracking started — '{name}' opened")
                         else:
                             _door_opened_at.pop(name, None)
                             _door_open_alerted_at.pop(name, None)
