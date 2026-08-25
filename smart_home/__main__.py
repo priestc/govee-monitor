@@ -1563,6 +1563,7 @@ def monitor(duration, verbose, db, no_db):
 
     def on_device(device, adv):
         now = datetime.datetime.now()
+        last_ble_activity["ts"] = now
         ble_name = device.name or adv.local_name or ""
 
         # Match BLE advertisement against registered iPhone bluetooth names.
@@ -2062,6 +2063,12 @@ def monitor(duration, verbose, db, no_db):
     latest_reading: dict[str, object] = {}
     # high-res buffer: label -> [(epoch_time, temp_f), ...] kept for ~60 seconds
     high_res_buffer: dict[str, list] = {}
+    # Updated on every BLE advertisement seen (any device), used by ble_watchdog_loop
+    # to detect a scanner that's silently stopped receiving callbacks (e.g. after the
+    # adapter is reset out from under bleak's D-Bus subscription — see incident where
+    # a USB reset of the Bluetooth dongle killed advertisement delivery with no
+    # exception raised, silently taking all temperature sensors offline).
+    last_ble_activity = {"ts": datetime.datetime.now()}
 
     def on_reading(reading):
         db_label = label_map.get(reading.address)
@@ -2165,6 +2172,31 @@ def monitor(duration, verbose, db, no_db):
                     (ts, name, size),
                 )
             conn.commit()
+
+    BLE_STALL_THRESHOLD = datetime.timedelta(minutes=10)
+
+    async def ble_watchdog_loop():
+        """Detect a BLE scanner that's silently stopped receiving advertisements.
+
+        Bleak subscribes to BlueZ over D-Bus; if the adapter is torn down and
+        recreated out from under it (e.g. a USB reset of the Bluetooth dongle),
+        the subscription goes dead with no exception raised — the process keeps
+        running but never sees another advertisement. Exit non-zero so systemd
+        (Restart=on-failure) restarts the process and re-attaches to the live
+        adapter, which is the only thing that actually recovers from this.
+        """
+        while True:
+            await asyncio.sleep(60)
+            stale_for = datetime.datetime.now() - last_ble_activity["ts"]
+            if stale_for > BLE_STALL_THRESHOLD:
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                click.echo(
+                    f"[{ts}] BLE watchdog: no advertisements seen in "
+                    f"{stale_for.total_seconds():.0f}s (threshold "
+                    f"{BLE_STALL_THRESHOLD.total_seconds():.0f}s) — scanner appears "
+                    f"stalled, restarting process"
+                )
+                os._exit(1)
 
     async def snapshot_loop():
         """Once per minute, write the latest reading for every sensor to the DB
@@ -2655,7 +2687,7 @@ def monitor(duration, verbose, db, no_db):
 
     click.echo("Monitoring BLE devices... (Ctrl+C to stop)")
     try:
-        extra = [snapshot_loop(), check_events_loop(), process_stats_loop(), garage_door_loop(), db_size_loop(), check_iphone_network(), check_iphone_bluetooth(), check_iphone_presence()]
+        extra = [snapshot_loop(), check_events_loop(), process_stats_loop(), garage_door_loop(), db_size_loop(), check_iphone_network(), check_iphone_bluetooth(), check_iphone_presence(), ble_watchdog_loop()]
         if cameras_cfg:
             extra.append(camera_watch_loop())
             extra.append(camera_vitals_loop())
